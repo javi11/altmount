@@ -289,6 +289,9 @@ type UsenetReader struct {
 	// budget holds under concurrent prefetch without a lock.
 	missRechecks atomic.Int32
 
+	// hedger decides when a slow demand-position fetch gets a second request.
+	hedger hedgePolicy
+
 	mu sync.Mutex
 }
 
@@ -610,8 +613,9 @@ func (b *UsenetReader) fetchContext(ctx context.Context, art *articleBuf, keepOn
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for
 // pool unavailability. keepOnClose lets a started streaming fetch finish after
-// ctx is cancelled; see fetchContext.
-func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment, keepOnClose bool) ([]byte, error) {
+// ctx is cancelled; see fetchContext. segIdx is the segment's range-local
+// index, which decides whether a slow fetch is at a demand position.
+func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment, segIdx int, keepOnClose bool) ([]byte, error) {
 	// Cache HIT: skip NNTP entirely
 	if b.segmentStore != nil {
 		if data, ok := b.segmentStore.Get(seg.Id); ok {
@@ -659,7 +663,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	}
 
 	if !b.priority {
-		data, err := b.fetchWithRetry(ctx, cp, seg, nil)
+		data, err := b.fetchWithRetry(ctx, cp, seg, segIdx, nil)
 		if b.segmentStore != nil && data != nil && err == nil {
 			_ = b.segmentStore.Put(seg.Id, data)
 		}
@@ -695,7 +699,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 					b.flights.release(seg.Id, kept)
 				}
 			}
-			data, err := b.fetchWithRetry(fetchCtx, cp, seg, art)
+			data, err := b.fetchWithRetry(fetchCtx, cp, seg, segIdx, art)
 			cancelFetch()
 			switch {
 			case err == nil:
@@ -745,8 +749,8 @@ const maxMissRechecks = 1
 // A miss is re-checked once before it is allowed to stand: providers answer
 // 430 transiently, and giving up on that answer is what condemned a healthy
 // file in issue #749.
-func (b *UsenetReader) fetchWithRetry(ctx context.Context, cp pool.NntpClient, seg *segment, art *articleBuf) ([]byte, error) {
-	data, err := b.fetchAttempts(ctx, cp, seg, art)
+func (b *UsenetReader) fetchWithRetry(ctx context.Context, cp pool.NntpClient, seg *segment, segIdx int, art *articleBuf) ([]byte, error) {
+	data, err := b.fetchAttempts(ctx, cp, seg, segIdx, art)
 	if !errors.Is(err, nntppool.ErrArticleNotFound) {
 		return data, err
 	}
@@ -758,7 +762,7 @@ func (b *UsenetReader) fetchWithRetry(ctx context.Context, cp pool.NntpClient, s
 
 	b.log.InfoContext(ctx, "article present on re-check, retrying transient miss",
 		"segment_id", seg.Id)
-	retryData, retryErr := b.fetchAttempts(ctx, cp, seg, art)
+	retryData, retryErr := b.fetchAttempts(ctx, cp, seg, segIdx, art)
 	if retryErr == nil {
 		return retryData, nil
 	}
@@ -796,7 +800,7 @@ func (b *UsenetReader) recheckMiss(ctx context.Context, cp pool.NntpClient, seg 
 }
 
 // fetchAttempts runs the retry loop for one wire fetch of a segment.
-func (b *UsenetReader) fetchAttempts(ctx context.Context, cp pool.NntpClient, seg *segment, art *articleBuf) ([]byte, error) {
+func (b *UsenetReader) fetchAttempts(ctx context.Context, cp pool.NntpClient, seg *segment, segIdx int, art *articleBuf) ([]byte, error) {
 	segStart := time.Now()
 	var resultBytes []byte
 	err := retry.Do(
@@ -813,9 +817,9 @@ func (b *UsenetReader) fetchAttempts(ctx context.Context, cp pool.NntpClient, se
 				// Streaming: priority lane, decoded bytes published to readers as
 				// each wire read lands. A failed attempt leaves its bytes visible;
 				// the next attempt starts a fresh buffer and only publishes once
-				// it has passed what readers already saw.
-				w = art.attemptWriter()
-				result, err = cp.BodyStreamPriority(attemptCtx, seg.Id, w)
+				// it has passed what readers already saw. A slow demand-position
+				// fetch is hedged with a second request; see streamArticle.
+				w, result, err = b.streamArticle(attemptCtx, cp, seg, segIdx, art)
 			} else {
 				// Import: normal lane, buffered — always yields to streaming reads.
 				result, err = cp.Body(attemptCtx, seg.Id)
@@ -1062,7 +1066,7 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 				return
 			}
 
-			data, err := b.downloadSegmentWithRetry(taskCtx, s, keepOnClose)
+			data, err := b.downloadSegmentWithRetry(taskCtx, s, segIdx, keepOnClose)
 
 			if err != nil {
 				if errors.Is(err, nntppool.ErrArticleNotFound) {
