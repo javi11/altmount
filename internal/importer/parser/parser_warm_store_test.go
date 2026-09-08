@@ -131,3 +131,56 @@ func TestWarmFirstSegmentsKeepsSkippingCleanVideosWithoutStore(t *testing.T) {
 		t.Fatalf("clean-named videos fetched %d first segments without a store, want 0", got)
 	}
 }
+
+func sevenZipVolumes() nzbparser.NzbFiles {
+	seg := func(prefix string) nzbparser.NzbSegments {
+		return nzbparser.NzbSegments{
+			{Bytes: 720000, Number: 1, ID: prefix + "-0"},
+			{Bytes: 720000, Number: 2, ID: prefix + "-1"},
+			{Bytes: 720000, Number: 3, ID: prefix + "-2"},
+			{Bytes: 120000, Number: 4, ID: prefix + "-3"},
+		}
+	}
+	return nzbparser.NzbFiles{
+		{Filename: "Movie.7z.001", Bytes: 2 << 30, Segments: seg("v1")},
+		{Filename: "Movie.7z.002", Bytes: 2 << 30, Segments: seg("v2")},
+		{Filename: "Movie.7z.003", Bytes: 1 << 30, Segments: seg("v3")},
+	}
+}
+
+// 7z analysis reads the first volume's head and the last volume's tail, each
+// a cold provider round trip today. With a store to keep them in, warm-up
+// fetches the last volume's last two articles alongside the heads.
+func TestWarmFirstSegmentsWarmsLastSevenZipVolumeTail(t *testing.T) {
+	fp := fakepool.New()
+	fp.SetDefaultBehavior(fakepool.SegmentBehavior{Bytes: []byte("z"), YEnc: nntppool.YEncMeta{FileSize: 1, PartSize: 1}})
+	store := &recordingStore{}
+	p := NewParser(newFakeFullPoolManager(fp), stormConfigGetter(4))
+	p.SetSegmentStore(func() SegmentStore { return store })
+
+	p.WarmFirstSegments(context.Background(), sevenZipVolumes())
+
+	for _, id := range []string{"v3-3", "v3-2"} {
+		if got := fp.PerMessageCalls(id); got != 1 {
+			t.Errorf("tail article %s fetched %d times, want 1", id, got)
+		}
+		if _, ok := store.get(id); !ok {
+			t.Errorf("tail article %s not put into the segment store", id)
+		}
+	}
+	if got := fp.PerMessageCalls("v2-3") + fp.PerMessageCalls("v1-3") + fp.PerMessageCalls("v3-1"); got != 0 {
+		t.Fatalf("unrelated articles fetched %d times, want 0", got)
+	}
+}
+
+func TestWarmFirstSegmentsSkipsSevenZipTailWithoutStore(t *testing.T) {
+	fp := fakepool.New()
+	fp.SetDefaultBehavior(fakepool.SegmentBehavior{Bytes: []byte("z"), YEnc: nntppool.YEncMeta{FileSize: 1, PartSize: 1}})
+	p := NewParser(newFakeFullPoolManager(fp), stormConfigGetter(4))
+
+	p.WarmFirstSegments(context.Background(), sevenZipVolumes())
+
+	if got := fp.PerMessageCalls("v3-3") + fp.PerMessageCalls("v3-2"); got != 0 {
+		t.Fatalf("tail articles fetched %d times without a store, want 0", got)
+	}
+}
