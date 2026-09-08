@@ -136,6 +136,17 @@ func statIDsWithBoundedRetries(
 		if len(remaining) == 0 {
 			return missing, nil, nil
 		}
+		if stopOnMissing && len(missing) == 0 && len(remaining) <= tolerableUnverified(len(ids)) {
+			// The release probe answers "is this post damaged?" from a
+			// sample. With everything else healthy, an article whose STAT
+			// neither the original request nor the priority hedge could get
+			// answered inside the ceiling is slow at the provider itself;
+			// waiting out further attempts held healthy imports for seconds.
+			// It is handled at stream time like the articles never sampled.
+			slog.InfoContext(ctx, "Fast-fail release probe proceeding with unverified stragglers",
+				"unverified", len(remaining), "sampled", len(ids), "attempt", attempt)
+			return missing, remaining, nil
+		}
 		delay := min(fastFailRetryBaseDelay<<(attempt-1), fastFailRetryMaxDelay)
 		// A sweep that is still shrinking is a slow provider answering, not a
 		// dead one, so it is followed until the budget runs out. It stops early
@@ -178,6 +189,16 @@ const (
 	deadReleaseMinMisses    = 8
 	deadReleaseMissFraction = 0.5
 )
+
+// tolerableUnverified is how many sampled articles the release probe may
+// leave unanswered and still pass: two of a full 64-article sample, none of a
+// small one, where each article is a large share of the evidence.
+func tolerableUnverified(sampled int) int {
+	if sampled >= 32 {
+		return 2
+	}
+	return 0
+}
 
 // releaseLooksDead reports whether the definitive STAT answers collected so
 // far (missing out of reported) already prove the release unservable. A
