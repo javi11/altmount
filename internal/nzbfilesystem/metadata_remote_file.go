@@ -1994,6 +1994,9 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		if rangeStr, ok := mvf.ctx.Value(utils.RangeKey).(string); ok && rangeStr != "" {
 			rangeHeader, err := utils.ParseRangeHeader(rangeStr)
 			if err == nil && rangeHeader != nil {
+				if rangeHeader.End >= mvf.meta.FileSize {
+					rangeHeader.End = mvf.meta.FileSize - 1
+				}
 				mvf.originalRangeEnd = rangeHeader.End
 				return rangeHeader.Start, rangeHeader.End
 			}
@@ -2021,6 +2024,12 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	if len(mvf.meta.SegmentData) == 0 {
 		return nil, ErrMissmatchedSegments
+	}
+	if start >= mvf.meta.FileSize {
+		return nil, io.EOF
+	}
+	if end >= mvf.meta.FileSize {
+		end = mvf.meta.FileSize - 1
 	}
 
 	// Build segment offset index lazily on first read (thread-safe via sync.Once)
