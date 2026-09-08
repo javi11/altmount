@@ -17,9 +17,16 @@ import (
 )
 
 const (
+	// fastFailStatMaxAttempts is the least number of attempts a sweep gets
+	// before a non-converging attempt ends it as inconclusive.
 	fastFailStatMaxAttempts = 3
 	fastFailRetryBaseDelay  = 100 * time.Millisecond
+	fastFailRetryMaxDelay   = 400 * time.Millisecond
 )
+
+// fastFailStatBudget caps the wall-clock a sweep may spend across all its
+// attempts. A var so tests can shorten it.
+var fastFailStatBudget = 15 * time.Second
 
 var (
 	// ErrFastFailInconclusive means bounded retries could not establish whether
@@ -33,9 +40,11 @@ func isDefinitiveFastFailMiss(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFound)
 }
 
-// statIDsWithBoundedRetries checks ids up to fastFailStatMaxAttempts times.
-// Successful and definitively missing ids leave the retry set immediately;
-// only operational errors and unreported ids are retried. The returned map
+// statIDsWithBoundedRetries checks ids, retrying for as long as each attempt
+// shrinks the unanswered set (at least fastFailStatMaxAttempts times, within
+// fastFailStatBudget overall). Successful and definitively missing ids leave
+// the retry set immediately; only operational errors and unreported ids are
+// retried. The returned map
 // contains only definitive misses. When stopOnMissing is true the first such
 // miss ends the sweep, preserving the release probe's fast-fail behavior.
 func statIDsWithBoundedRetries(
@@ -60,12 +69,13 @@ func statIDsWithBoundedRetries(
 	missing = make(map[string]error)
 	var lastErr error
 
-	for attempt := 1; attempt <= fastFailStatMaxAttempts && len(remaining) > 0; attempt++ {
+	sweepStart := time.Now()
+	for attempt := 1; len(remaining) > 0; attempt++ {
 		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(remaining), maxConnections, timeout))
 		reported := make(map[string]bool, len(remaining))
 		transient := make(map[string]error, len(remaining))
 
-		for result := range client.StatMany(statCtx, remaining, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		for result := range hedgedStatMany(statCtx, client, remaining, maxConnections) {
 			if _, wanted := seen[result.MessageID]; !wanted {
 				continue
 			}
@@ -120,22 +130,27 @@ func statIDsWithBoundedRetries(
 				next = append(next, id)
 			}
 		}
+		converging := len(next) < len(remaining)
 		remaining = next
 
 		if len(remaining) == 0 {
 			return missing, nil, nil
 		}
-		if attempt == fastFailStatMaxAttempts || releaseLooksDead(len(missing), len(ids)-len(remaining)) {
-			// Bounded retries exhausted, or the definitive answers so far
-			// already condemn the release: a sweep dominated by 430s is a dead
-			// post whose remaining STATs are only queued behind more 430s
-			// (each one costs the provider a slow spool lookup), so waiting
-			// them out adds tens of seconds and changes nothing.
+		delay := min(fastFailRetryBaseDelay<<(attempt-1), fastFailRetryMaxDelay)
+		// A sweep that is still shrinking is a slow provider answering, not a
+		// dead one, so it is followed until the budget runs out. It stops early
+		// when an attempt past the minimum made no progress, or when the
+		// definitive answers so far already condemn the release: a sweep
+		// dominated by 430s is a dead post whose remaining STATs are only queued
+		// behind more 430s (each one costs the provider a slow spool lookup), so
+		// waiting them out adds tens of seconds and changes nothing.
+		stalled := attempt >= fastFailStatMaxAttempts && !converging
+		overBudget := time.Since(sweepStart)+delay >= fastFailStatBudget
+		if stalled || overBudget || releaseLooksDead(len(missing), len(ids)-len(remaining)) {
 			return missing, remaining, fmt.Errorf("%w: %d segment(s) remained unverified after %d attempts: %w",
 				ErrFastFailInconclusive, len(remaining), attempt, lastErr)
 		}
 
-		delay := fastFailRetryBaseDelay << (attempt - 1)
 		slog.WarnContext(ctx, "Retrying inconclusive fast-fail STATs",
 			"attempt", attempt+1,
 			"remaining", len(remaining),
