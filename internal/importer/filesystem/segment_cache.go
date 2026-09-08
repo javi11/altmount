@@ -57,6 +57,9 @@ type ImportSegmentCache struct {
 	misses    int64
 	evictions int64
 	curBytes  int64
+
+	// fallback, when set, is consulted on a local miss; see WithFallback.
+	fallback usenet.SegmentStore
 }
 
 type importSegmentCacheEntry struct {
@@ -153,6 +156,13 @@ func (c *ImportSegmentCache) Get(messageID string) ([]byte, bool) {
 
 	el, ok := c.items[messageID]
 	if !ok {
+		if c.fallback != nil {
+			if data, found := c.fallback.Get(messageID); found {
+				c.hits++
+				c.putLocked(messageID, data)
+				return data, true
+			}
+		}
 		c.misses++
 		return nil, false
 	}
@@ -167,7 +177,11 @@ func (c *ImportSegmentCache) Get(messageID string) ([]byte, bool) {
 func (c *ImportSegmentCache) Put(messageID string, data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.putLocked(messageID, data)
+	return nil
+}
 
+func (c *ImportSegmentCache) putLocked(messageID string, data []byte) {
 	if el, ok := c.items[messageID]; ok {
 		entry := el.Value.(*importSegmentCacheEntry)
 		c.curBytes -= int64(len(entry.data))
@@ -191,6 +205,13 @@ func (c *ImportSegmentCache) Put(messageID string, data []byte) error {
 		delete(c.items, entry.id)
 		c.curBytes -= int64(len(entry.data))
 	}
+}
 
-	return nil
+// WithFallback makes Get consult store when this cache misses, keeping what it
+// finds locally. The streaming segment store holds the articles the import
+// warm-up fetched (first segments, the last 7z volume's tail), which are
+// exactly the ones an archive-analysis pass reads first.
+func (c *ImportSegmentCache) WithFallback(store usenet.SegmentStore) *ImportSegmentCache {
+	c.fallback = store
+	return c
 }

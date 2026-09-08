@@ -1017,7 +1017,43 @@ func (p *Parser) WarmFirstSegments(ctx context.Context, files []nzbparser.NzbFil
 			return nil
 		})
 	}
+	for _, id := range p.sevenZipTailToWarm(files) {
+		warm.Go(func(ctx context.Context) error {
+			_, _ = p.fetchBodyWithRetry(ctx, cp, id)
+			return nil
+		})
+	}
 	_ = warm.Wait()
+}
+
+// sevenZipTailToWarm is the last two segment ids of the highest-numbered
+// .7z.NNN volume, or nil. 7z analysis opens the archive by reading the first
+// volume's head and then the end header at the very end of the last volume;
+// with a segment store to keep the articles in, both become cache hits instead
+// of two serial provider round trips on the import's critical path.
+func (p *Parser) sevenZipTailToWarm(files []nzbparser.NzbFile) []string {
+	if p.segmentStore == nil || p.segmentStore() == nil {
+		return nil
+	}
+	lastVolume, lastIdx := -1, -1
+	for i := range files {
+		m := sevenZipContinuationPattern.FindStringSubmatch(files[i].Filename)
+		if m == nil {
+			continue
+		}
+		if n, err := strconv.Atoi(m[1]); err == nil && n > lastVolume {
+			lastVolume, lastIdx = n, i
+		}
+	}
+	if lastIdx < 0 {
+		return nil
+	}
+	segs := files[lastIdx].Segments
+	var ids []string
+	for i := len(segs) - 1; i > 0 && i >= len(segs)-2; i-- {
+		ids = append(ids, segs[i].ID)
+	}
+	return ids
 }
 
 // primaryVideoToWarm is the index of the largest video file whose first

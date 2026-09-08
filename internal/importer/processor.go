@@ -33,6 +33,7 @@ import (
 	"github.com/kipsilabs/altmount/internal/nzbfile"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 const (
@@ -137,8 +138,25 @@ func (proc *Processor) SetPatchIndex(idx validation.PatchIndex) {
 
 // SetSegmentStore publishes first articles fetched at import to the streaming
 // segment store, so the cold open right after an import is a cache hit.
-func (proc *Processor) SetSegmentStore(resolve func() parser.SegmentStore) {
-	proc.parser.SetSegmentStore(resolve)
+func (proc *Processor) SetSegmentStore(resolve func() usenet.SegmentStore) {
+	proc.parser.SetSegmentStore(func() parser.SegmentStore {
+		if store := resolve(); store != nil {
+			return store
+		}
+		return nil
+	})
+	// The archive analysis passes read the warmed articles back through their
+	// import-scoped caches. Optional so the processors' interfaces (and their
+	// test doubles) stay unchanged.
+	type storeAware interface {
+		SetSegmentStore(func() usenet.SegmentStore)
+	}
+	if p, ok := proc.rarProcessor.(storeAware); ok {
+		p.SetSegmentStore(resolve)
+	}
+	if p, ok := proc.sevenZipProcessor.(storeAware); ok {
+		p.SetSegmentStore(resolve)
+	}
 }
 
 // queueNzbRepair queues an NZB-mode repair for a release that was deferred
