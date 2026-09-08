@@ -82,3 +82,52 @@ func TestWarmFirstSegmentsWithoutStoreStillWarmsHeads(t *testing.T) {
 		t.Fatalf("warm-up fetched vid-0 %d times, want 1", got)
 	}
 }
+
+func cleanVideos() nzbparser.NzbFiles {
+	seg := func(prefix string) nzbparser.NzbSegments {
+		return nzbparser.NzbSegments{
+			{Bytes: 720000, Number: 1, ID: prefix + "-0"},
+			{Bytes: 720000, Number: 2, ID: prefix + "-1"},
+			{Bytes: 720000, Number: 3, ID: prefix + "-2"},
+		}
+	}
+	return nzbparser.NzbFiles{
+		{Filename: "Show.S01E01.1080p.WEB-DL.mkv", Bytes: 4 << 30, Segments: seg("e1")},
+		{Filename: "Show.S01E02.1080p.WEB-DL.mkv", Bytes: 6 << 30, Segments: seg("e2")},
+	}
+}
+
+// Clean-named videos skip their first-segment fetch to save bandwidth, but the
+// largest one is what a player opens first: with a segment store to keep the
+// article in, warming just that file turns the cold open into a cache hit.
+func TestWarmFirstSegmentsWarmsLargestVideoWhenStoreIsWired(t *testing.T) {
+	fp := fakepool.New()
+	fp.SetDefaultBehavior(fakepool.SegmentBehavior{Bytes: []byte("v"), YEnc: nntppool.YEncMeta{FileSize: 1, PartSize: 1}})
+	store := &recordingStore{}
+	p := NewParser(newFakeFullPoolManager(fp), stormConfigGetter(4))
+	p.SetSegmentStore(func() SegmentStore { return store })
+
+	p.WarmFirstSegments(context.Background(), cleanVideos())
+
+	if got := fp.PerMessageCalls("e2-0"); got != 1 {
+		t.Fatalf("largest video first segment fetched %d times, want 1", got)
+	}
+	if _, ok := store.get("e2-0"); !ok {
+		t.Fatal("largest video first segment not put into the segment store")
+	}
+	if got := fp.PerMessageCalls("e1-0"); got != 0 {
+		t.Fatalf("smaller video first segment fetched %d times, want 0: only the largest is warmed", got)
+	}
+}
+
+func TestWarmFirstSegmentsKeepsSkippingCleanVideosWithoutStore(t *testing.T) {
+	fp := fakepool.New()
+	fp.SetDefaultBehavior(fakepool.SegmentBehavior{Bytes: []byte("v"), YEnc: nntppool.YEncMeta{FileSize: 1, PartSize: 1}})
+	p := NewParser(newFakeFullPoolManager(fp), stormConfigGetter(4))
+
+	p.WarmFirstSegments(context.Background(), cleanVideos())
+
+	if got := fp.PerMessageCalls("e1-0") + fp.PerMessageCalls("e2-0"); got != 0 {
+		t.Fatalf("clean-named videos fetched %d first segments without a store, want 0", got)
+	}
+}
