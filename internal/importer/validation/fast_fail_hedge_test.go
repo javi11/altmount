@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -16,7 +17,10 @@ import (
 type delayedStatClient struct {
 	*scriptedStatClient
 	firstDelay map[string]time.Duration
-	sweeps     int
+	// alwaysDelay applies to every STAT of the id, hedges included: an
+	// article that is slow at the provider, not one queued on a connection.
+	alwaysDelay map[string]time.Duration
+	sweeps      int
 }
 
 func newDelayedStatClient(outcomes map[string][]error, firstDelay map[string]time.Duration) *delayedStatClient {
@@ -44,8 +48,8 @@ func (c *delayedStatClient) StatMany(ctx context.Context, ids []string, _ nntppo
 			if len(sequence) > 0 {
 				err = sequence[min(attempt, len(sequence)-1)]
 			}
-			delay := time.Duration(0)
-			if attempt == 0 {
+			delay := c.alwaysDelay[id]
+			if attempt == 0 && delay == 0 {
 				delay = c.firstDelay[id]
 			}
 			c.mu.Unlock()
@@ -229,5 +233,45 @@ func TestFastFailReleaseProbeHedgesWhenArrivalsStall(t *testing.T) {
 	}
 	if got := client.sweepCount(); got != 2 {
 		t.Fatalf("StatMany sweeps = %d, want 2 (primary + one hedge for every outstanding id)", got)
+	}
+}
+
+// One article of sixty-four that neither the original STAT nor the priority
+// hedge can get an answer for is slow at the provider itself; three 2 s
+// attempts on it held a healthy import for 4.5 s in the bench. The release
+// probe answers "damaged?" from a sample, and the articles it never sampled
+// are handled at stream time — so is this one. The per-file sweep, which maps
+// exactly which files are broken, keeps waiting.
+func TestFastFailReleaseProbeToleratesAFewUnverifiedStragglers(t *testing.T) {
+	client := newDelayedStatClient(nil, nil)
+	client.alwaysDelay = map[string]time.Duration{"seg-40": 10 * time.Second}
+
+	start := time.Now()
+	missing, err := FastFailReleaseProbe(context.Background(), probeFile(64), fastFailPoolManager{client: client}, 100, 64, 30*time.Second, nil)
+	elapsed := time.Since(start)
+	if err != nil || missing {
+		t.Fatalf("FastFailReleaseProbe = (%v, %v), want (false, nil): 63 of 64 answered healthy", missing, err)
+	}
+	if elapsed > 2500*time.Millisecond {
+		t.Fatalf("probe took %s, want one attempt (the 2 s ceiling), not retries on the one slow article", elapsed)
+	}
+	if got := client.callCount("seg-40"); got > 2 {
+		t.Fatalf("slow article STATs = %d, want at most 2 (original + hedge)", got)
+	}
+}
+
+func TestFastFailReleaseProbeDoesNotTolerateManyUnverified(t *testing.T) {
+	client := newDelayedStatClient(nil, nil)
+	client.alwaysDelay = map[string]time.Duration{}
+	for i := 40; i < 44; i++ {
+		client.alwaysDelay[fmt.Sprintf("seg-%d", i)] = 10 * time.Second
+	}
+	prev := fastFailStatBudget
+	fastFailStatBudget = 3 * time.Second
+	t.Cleanup(func() { fastFailStatBudget = prev })
+
+	_, err := FastFailReleaseProbe(context.Background(), probeFile(64), fastFailPoolManager{client: client}, 100, 64, 30*time.Second, nil)
+	if !errors.Is(err, ErrFastFailInconclusive) {
+		t.Fatalf("FastFailReleaseProbe error = %v, want ErrFastFailInconclusive: four unanswered is not a tolerable tail", err)
 	}
 }
