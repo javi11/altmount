@@ -1139,6 +1139,15 @@ func (idx *segmentOffsetIndex) findSegmentForOffset(offset int64) int {
 	return lo - 1
 }
 
+// totalBytes is the number of bytes the indexed segments cover.
+func (idx *segmentOffsetIndex) totalBytes() int64 {
+	if idx == nil || len(idx.offsets) == 0 {
+		return 0
+	}
+	n := len(idx.offsets)
+	return idx.offsets[n-1] + idx.sizes[n-1]
+}
+
 // getOffsetForSegment returns the cumulative file offset at the start of the given segment index
 // Returns 0 if the index is invalid or out of bounds
 func (idx *segmentOffsetIndex) getOffsetForSegment(segmentIndex int) int64 {
@@ -1177,6 +1186,7 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		return 0, ErrFileClosed
 	}
 
+	stalledAt := int64(-1)
 	for n < len(p) {
 		if err := mvf.ensureReader(); err != nil {
 			return n, err
@@ -1198,6 +1208,13 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
+				// A rebuilt reader that ends at the same offset again cannot reach
+				// the range end; rotating once more would spin here holding mvf.mu.
+				if totalRead == 0 && mvf.position == stalledAt {
+					mvf.closeCurrentReader()
+					return n, fmt.Errorf("%w: reader ended at offset %d before the requested end", io.ErrUnexpectedEOF, mvf.position)
+				}
+				stalledAt = mvf.position
 				// Close current reader and try to get a new one for the next range in next iteration
 				mvf.closeCurrentReader()
 				continue
@@ -1327,6 +1344,7 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 		}
 		buf := p[:want]
 		var sharedErr error
+		stalledAt := int64(-1)
 		for n < int(want) {
 			rn, readErr := mvf.reader.Read(buf[n:])
 			n += rn
@@ -1341,6 +1359,14 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 
 			if readErr != nil {
 				if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
+					// Same no-progress guard as Read: a rebuilt reader ending at the
+					// same offset cannot reach the range end.
+					at := off + int64(n)
+					if rn == 0 && at == stalledAt {
+						sharedErr = fmt.Errorf("%w: reader ended at offset %d before the requested end", io.ErrUnexpectedEOF, at)
+						break
+					}
+					stalledAt = at
 					mvf.closeCurrentReader()
 					if rotateErr := mvf.ensureReader(); rotateErr != nil {
 						sharedErr = rotateErr
@@ -2025,17 +2051,23 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	if len(mvf.meta.SegmentData) == 0 {
 		return nil, ErrMissmatchedSegments
 	}
-	if start >= mvf.meta.FileSize {
-		return nil, io.EOF
-	}
-	if end >= mvf.meta.FileSize {
-		end = mvf.meta.FileSize - 1
-	}
 
 	// Build segment offset index lazily on first read (thread-safe via sync.Once)
 	mvf.segmentIndexOnce.Do(func() {
 		mvf.segmentIndex = buildSegmentIndex(mvf.meta.SegmentData)
 	})
+
+	// Bound the range by what the segments cover, not by FileSize: an
+	// AES-encrypted file's segments extend up to 15 bytes past FileSize (the
+	// padded final block), and the decryptor needs them to produce the last
+	// plaintext bytes.
+	covered := mvf.segmentIndex.totalBytes()
+	if start >= covered {
+		return nil, io.EOF
+	}
+	if end >= covered {
+		end = covered - 1
+	}
 
 	loader := newMetadataSegmentLoader(mvf.meta.SegmentData)
 
