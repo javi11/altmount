@@ -207,3 +207,27 @@ func TestFastFailReleaseProbeHedgesLargerStragglerTailOnPriorityLane(t *testing.
 		t.Fatal("hedge sweep must use the priority lane")
 	}
 }
+
+// A third of a probe stuck behind slow connections while the other two thirds
+// answered in ~150 ms is what a cold pool looks like; a fixed fraction never
+// catches it. Once answers stop arriving for a grace period, whatever is still
+// outstanding is hedged, however many that is.
+func TestFastFailReleaseProbeHedgesWhenArrivalsStall(t *testing.T) {
+	delays := make(map[string]time.Duration, 22)
+	for i := 40; i < 62; i++ {
+		delays[fmt.Sprintf("seg-%d", i)] = 5 * time.Second
+	}
+	client := newDelayedStatClient(nil, delays)
+
+	start := time.Now()
+	missing, err := FastFailReleaseProbe(context.Background(), probeFile(64), fastFailPoolManager{client: client}, 100, 64, 30*time.Second, nil)
+	if err != nil || missing {
+		t.Fatalf("FastFailReleaseProbe = (%v, %v), want (false, nil)", missing, err)
+	}
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
+		t.Fatalf("probe took %s, want the 22 stalled STATs hedged inside the 2 s ceiling", elapsed)
+	}
+	if got := client.sweepCount(); got != 2 {
+		t.Fatalf("StatMany sweeps = %d, want 2 (primary + one hedge for every outstanding id)", got)
+	}
+}
