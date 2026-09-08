@@ -2,6 +2,7 @@ package validation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -87,5 +88,49 @@ func TestDeadReleaseResultsMarkEveryFileBroken(t *testing.T) {
 	}
 	if got := results[1].MissingSegmentIDs; len(got) != 1 || got[0] != "b-2" {
 		t.Fatalf("file 1 missing ids = %v, want [b-2]", got)
+	}
+}
+
+// A damaged-not-dead post (first article of every volume gone) reaches the
+// per-file sweep. On a provider answering 430s slowly the sweep used to
+// dispatch 64 STATs and wait the attempt out — 18 s in the bench — although
+// the first dozen misses already condemned the release, and every 430 it left
+// in flight slowed the import that followed. The attempt ends as soon as the
+// definitive answers prove the post dead, and the first chunk stays small.
+func TestFastFailCheckFilesEndsAttemptOnceReleaseIsDead(t *testing.T) {
+	var files []FastFailFile
+	outcomes := make(map[string][]error, 64)
+	slow := make(map[string]time.Duration, 64)
+	for i := range 64 {
+		segs := makeTestSegments(fmt.Sprintf("v%02d", i), 1)
+		files = append(files, FastFailFile{Filename: fmt.Sprintf("vol%02d.mkv", i), Segments: segs})
+		outcomes[segs[0].Id] = []error{nntppool.ErrArticleNotFound}
+		if i >= 12 {
+			slow[segs[0].Id] = 3 * time.Second
+		}
+	}
+	client := newDelayedStatClient(outcomes, nil)
+	client.alwaysDelay = slow
+
+	start := time.Now()
+	results, err := FastFailCheckFiles(context.Background(), files, fastFailPoolManager{client: client}, 100, 64, 30*time.Second, nil, nil, false)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("FastFailCheckFiles error = %v, want the dead-release verdict", err)
+	}
+	for i, r := range results {
+		if !r.Broken {
+			t.Fatalf("results[%d] not Broken on a dead release", i)
+		}
+	}
+	if elapsed > 1500*time.Millisecond {
+		t.Fatalf("sweep took %s, want the attempt cut once a dozen misses condemned the release", elapsed)
+	}
+	total := 0
+	for i := range 64 {
+		total += client.callCount(fmt.Sprintf("v%02d-0", i))
+	}
+	if total > firstSweepChunk {
+		t.Fatalf("STATs issued = %d, want at most the first chunk of %d", total, firstSweepChunk)
 	}
 }
