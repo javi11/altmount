@@ -12,7 +12,6 @@ import (
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
-	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -74,6 +73,8 @@ func statIDsWithBoundedRetries(
 		statCtx, cancel := context.WithTimeout(ctx, pool.StatManyTimeout(len(remaining), maxConnections, timeout))
 		reported := make(map[string]bool, len(remaining))
 		transient := make(map[string]error, len(remaining))
+		definitive := 0
+		deadEarly := false
 
 		for result := range hedgedStatMany(statCtx, client, remaining, maxConnections) {
 			if _, wanted := seen[result.MessageID]; !wanted {
@@ -81,16 +82,19 @@ func statIDsWithBoundedRetries(
 			}
 			reported[result.MessageID] = true
 			if result.Err == nil {
+				definitive++
 				continue
 			}
 			// Repaired bytes live only in the local patch store, so an article
 			// the providers dropped is still available. Reported with no error
 			// recorded, it leaves the retry set as reachable.
 			if patched(patchIdx, result.MessageID) {
+				definitive++
 				continue
 			}
 			if isDefinitiveFastFailMiss(result.Err) {
 				missing[result.MessageID] = result.Err
+				definitive++
 				if stopOnMissing {
 					if ctxErr := ctx.Err(); ctxErr != nil {
 						cancel()
@@ -98,6 +102,14 @@ func statIDsWithBoundedRetries(
 					}
 					cancel()
 					return missing, nil, nil
+				}
+				if releaseLooksDead(len(missing), definitive) {
+					// The answers so far already condemn the release; the
+					// STATs still in flight are slow 430 lookups that cannot
+					// change it and only hold the import and the connections.
+					deadEarly = true
+					cancel()
+					break
 				}
 				continue
 			}
@@ -136,6 +148,21 @@ func statIDsWithBoundedRetries(
 		if len(remaining) == 0 {
 			return missing, nil, nil
 		}
+		if deadEarly {
+			return missing, remaining, fmt.Errorf("%w: %d segment(s) left unverified once %d misses condemned the release",
+				ErrFastFailInconclusive, len(remaining), len(missing))
+		}
+		if stopOnMissing && len(missing) == 0 && len(remaining) <= tolerableUnverified(len(ids)) {
+			// The release probe answers "is this post damaged?" from a
+			// sample. With everything else healthy, an article whose STAT
+			// neither the original request nor the priority hedge could get
+			// answered inside the ceiling is slow at the provider itself;
+			// waiting out further attempts held healthy imports for seconds.
+			// It is handled at stream time like the articles never sampled.
+			slog.InfoContext(ctx, "Fast-fail release probe proceeding with unverified stragglers",
+				"unverified", len(remaining), "sampled", len(ids), "attempt", attempt)
+			return missing, remaining, nil
+		}
 		delay := min(fastFailRetryBaseDelay<<(attempt-1), fastFailRetryMaxDelay)
 		// A sweep that is still shrinking is a slow provider answering, not a
 		// dead one, so it is followed until the budget runs out. It stops early
@@ -172,12 +199,27 @@ func statIDsWithBoundedRetries(
 // maxSweepChunk is the most STATs the per-file sweep has outstanding at once.
 const maxSweepChunk = 64
 
+// firstSweepChunk bounds the sweep's opening wave: a dead post is condemned
+// by its first few misses, and every STAT past those is a slow 430 lookup left
+// pipelined on a connection for the next import to queue behind.
+const firstSweepChunk = 16
+
 // Dead-post thresholds for releaseLooksDead: at least this many definitive
 // misses, making up at least this share of the definitive answers so far.
 const (
 	deadReleaseMinMisses    = 8
 	deadReleaseMissFraction = 0.5
 )
+
+// tolerableUnverified is how many sampled articles the release probe may
+// leave unanswered and still pass: two of a full 64-article sample, none of a
+// small one, where each article is a large share of the evidence.
+func tolerableUnverified(sampled int) int {
+	if sampled >= 32 {
+		return 2
+	}
+	return 0
+}
 
 // releaseLooksDead reports whether the definitive STAT answers collected so
 // far (missing out of reported) already prove the release unservable. A
@@ -338,68 +380,8 @@ func FastFailReleaseProbe(
 	timeout time.Duration,
 	patchIdx PatchIndex,
 ) (bool, error) {
-	var segments []*metapb.SegmentData
-	for _, file := range files {
-		for _, segment := range file.Segments {
-			if segment == nil || segment.Id == "" {
-				continue
-			}
-			if holes.IsPlaceholderID(segment.Id) {
-				// A gap the NZB itself declares is not a provider miss: it is
-				// mapped without a STAT (PlaceholderResults), and the probe's
-				// job is still to answer for the articles the NZB does list.
-				continue
-			}
-			segments = append(segments, segment)
-		}
-	}
-	if len(segments) == 0 {
-		return false, nil
-	}
-
-	selected := capReleaseProbeSample(usenet.SelectSegmentsForValidation(segments, segmentSamplePercentage))
-	if len(selected) == 0 {
-		return false, nil
-	}
-
-	if !poolManager.HasPool() {
-		return false, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
-	}
-
-	usenetPool, err := poolManager.GetPool()
-	if err != nil {
-		return false, fmt.Errorf("cannot fast-fail import: usenet connection pool unavailable: %w", err)
-	}
-	if usenetPool == nil {
-		return false, fmt.Errorf("cannot fast-fail import: usenet connection pool is nil")
-	}
-
-	if maxConnections <= 0 {
-		maxConnections = 1
-	}
-
-	ids := make([]string, len(selected))
-	for i, seg := range selected {
-		ids[i] = seg.Id
-	}
-
-	// Stat the sample via a bulk sweep, cancelling the rest on the first
-	// definitive miss. Operational errors retry only the affected IDs. Cap each
-	// attempt's probe timeout to 2 seconds per item so dead releases stay bounded.
-	probeTimeout := timeout
-	if probeTimeout > 2*time.Second {
-		probeTimeout = 2 * time.Second
-	}
-	missing, _, err := statIDsWithBoundedRetries(ctx, usenetPool, ids, maxConnections, probeTimeout, true, patchIdx)
-	if err != nil {
-		if len(missing) > 0 {
-			// The probe found a definitive miss before running out of
-			// patience for the rest; the answer is "damaged" either way.
-			return true, nil
-		}
-		return false, err
-	}
-	return len(missing) > 0, nil
+	v, err := FastFailReleaseProbeVerdict(ctx, files, poolManager, segmentSamplePercentage, maxConnections, timeout, patchIdx)
+	return v.Missing, err
 }
 
 // FastFailFileResult records the reachability outcome for a single FastFailFile.
@@ -563,8 +545,8 @@ func FastFailCheckFiles(
 	// times out behind the backlog. Smaller waves let the dead-release verdict
 	// fire after one wave with little left outstanding.
 	chunkSize := min(maxConnections, maxSweepChunk)
-	for start := 0; start < total; start += chunkSize {
-		end := min(start+chunkSize, total)
+	for start, size := 0, min(chunkSize, firstSweepChunk); start < total; start, size = start+size, chunkSize {
+		end := min(start+size, total)
 		chunk := jobs[start:end]
 
 		toCheck := make([]statJob, 0, len(chunk))

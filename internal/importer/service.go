@@ -34,6 +34,7 @@ import (
 	"github.com/kipsilabs/altmount/internal/nzbfile"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/kipsilabs/altmount/internal/sabnzbd"
 	"github.com/kipsilabs/altmount/internal/utils"
 	"github.com/kipsilabs/altmount/pkg/rclonecli"
@@ -222,6 +223,14 @@ func (s *Service) FailWaitingRepair(ctx context.Context, nzbPath string, reason 
 func (s *Service) SetPatchIndex(idx validation.PatchIndex) {
 	if s.processor != nil {
 		s.processor.SetPatchIndex(idx)
+	}
+}
+
+// SetSegmentStore wires the streaming segment store into the importer so
+// articles fetched at import are already cached when playback starts.
+func (s *Service) SetSegmentStore(resolve func() usenet.SegmentStore) {
+	if s.processor != nil {
+		s.processor.SetSegmentStore(resolve)
 	}
 }
 

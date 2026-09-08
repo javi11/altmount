@@ -22,6 +22,7 @@ import (
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/javi11/rardecode/v2"
 	"github.com/javi11/sevenzip"
 	"golang.org/x/text/encoding/unicode"
@@ -32,6 +33,27 @@ type sevenZipProcessor struct {
 	log          *slog.Logger
 	poolManager  pool.Manager
 	configGetter config.ConfigGetter
+	// segmentStore resolves the streaming segment store, whose warmed head and
+	// tail articles the header pass reads through; nil when caching is off.
+	segmentStore func() usenet.SegmentStore
+}
+
+// SetSegmentStore lets analysis passes read articles the import warm-up already
+// fetched instead of paying a second provider round trip for them.
+func (sz *sevenZipProcessor) SetSegmentStore(resolve func() usenet.SegmentStore) {
+	sz.segmentStore = resolve
+}
+
+// newSegmentCache is the import-scoped cache for one analysis pass, reading
+// through to the streaming store when one is wired.
+func (sz *sevenZipProcessor) newSegmentCache() *filesystem.ImportSegmentCache {
+	c := filesystem.NewImportSegmentCache(0)
+	if sz.segmentStore != nil {
+		if store := sz.segmentStore(); store != nil {
+			c.WithFallback(store)
+		}
+	}
+	return c
 }
 
 // NewProcessor creates a new 7zip processor
@@ -135,7 +157,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// (see UsenetFile.ReadAt) — without a shared cache, every central-directory
 	// or header probe that revisits an already-fetched segment re-downloads it.
 	// Bounded and released (by dropping the reference) when this pass returns.
-	segStore := filesystem.NewImportSegmentCache(0)
+	segStore := sz.newSegmentCache()
 	defer segStore.LogStats(ctx, sz.log, "7z-header")
 	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, headerAnalysisPrefetch, progressTracker, readTimeout, segStore)
 
@@ -918,7 +940,7 @@ func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerR
 	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
 	headerAnalysisPrefetch := 1
 	// Import-scoped segment cache, private to this nested-RAR analysis pass.
-	segStore := filesystem.NewImportSegmentCache(0)
+	segStore := sz.newSegmentCache()
 	defer segStore.LogStats(ctx, sz.log, "7z-nested")
 	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, headerAnalysisPrefetch, readTimeout, segStore)
 

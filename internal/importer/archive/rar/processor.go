@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/rardecode/v2"
 	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/errors"
 	"github.com/kipsilabs/altmount/internal/importer/archive"
@@ -19,7 +20,6 @@ import (
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
 	"github.com/kipsilabs/altmount/internal/usenet"
-	"github.com/javi11/rardecode/v2"
 )
 
 // rarProcessor handles RAR archive analysis and content extraction
@@ -27,6 +27,27 @@ type rarProcessor struct {
 	log          *slog.Logger
 	poolManager  pool.Manager
 	configGetter config.ConfigGetter
+	// segmentStore resolves the streaming segment store, whose warmed first
+	// articles the header pass reads through; nil when caching is off.
+	segmentStore func() usenet.SegmentStore
+}
+
+// SetSegmentStore lets analysis passes read articles the import warm-up already
+// fetched instead of paying a second provider round trip for them.
+func (rh *rarProcessor) SetSegmentStore(resolve func() usenet.SegmentStore) {
+	rh.segmentStore = resolve
+}
+
+// newSegmentCache is the import-scoped cache for one analysis pass, reading
+// through to the streaming store when one is wired.
+func (rh *rarProcessor) newSegmentCache() *filesystem.ImportSegmentCache {
+	c := filesystem.NewImportSegmentCache(0)
+	if rh.segmentStore != nil {
+		if store := rh.segmentStore(); store != nil {
+			c.WithFallback(store)
+		}
+	}
+	return c
 }
 
 // NewProcessor creates a new RAR processor
@@ -123,7 +144,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Import-scoped segment cache: rardecode's parallel volume reads and repeated
 	// header probing frequently revisit the same leading segments across volumes.
 	// Bounded and released (by dropping the reference) when this analysis pass returns.
-	segStore := filesystem.NewImportSegmentCache(0)
+	segStore := rh.newSegmentCache()
 	defer segStore.LogStats(ctx, rh.log, "rar-header")
 	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, headerAnalysisPrefetch, progressTracker, readTimeout, segStore)
 
@@ -801,7 +822,7 @@ func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarCon
 	// Header analysis only reads initial volume headers, so prefetch is capped at 1.
 	headerAnalysisPrefetch := 1
 	// Import-scoped segment cache, private to this nested-RAR analysis pass.
-	segStore := filesystem.NewImportSegmentCache(0)
+	segStore := rh.newSegmentCache()
 	defer segStore.LogStats(ctx, rh.log, "rar-nested")
 	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, headerAnalysisPrefetch, readTimeout, segStore)
 

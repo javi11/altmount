@@ -33,6 +33,7 @@ import (
 	"github.com/kipsilabs/altmount/internal/nzbfile"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
+	"github.com/kipsilabs/altmount/internal/usenet"
 )
 
 const (
@@ -133,6 +134,29 @@ func (proc *Processor) SetRepairEnqueuer(re RepairEnqueuer) {
 // as available during the fast-fail availability sweep.
 func (proc *Processor) SetPatchIndex(idx validation.PatchIndex) {
 	proc.patchIndex = idx
+}
+
+// SetSegmentStore publishes first articles fetched at import to the streaming
+// segment store, so the cold open right after an import is a cache hit.
+func (proc *Processor) SetSegmentStore(resolve func() usenet.SegmentStore) {
+	proc.parser.SetSegmentStore(func() parser.SegmentStore {
+		if store := resolve(); store != nil {
+			return store
+		}
+		return nil
+	})
+	// The archive analysis passes read the warmed articles back through their
+	// import-scoped caches. Optional so the processors' interfaces (and their
+	// test doubles) stay unchanged.
+	type storeAware interface {
+		SetSegmentStore(func() usenet.SegmentStore)
+	}
+	if p, ok := proc.rarProcessor.(storeAware); ok {
+		p.SetSegmentStore(resolve)
+	}
+	if p, ok := proc.sevenZipProcessor.(storeAware); ok {
+		p.SetSegmentStore(resolve)
+	}
 }
 
 // queueNzbRepair queues an NZB-mode repair for a release that was deferred
@@ -408,7 +432,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	// common case — pay only this and skip the per-file sweep entirely, keeping
 	// the "Checking segment availability" stage short.
 	probeStart := time.Now()
-	missing, err := validation.FastFailReleaseProbe(
+	verdict, err := validation.FastFailReleaseProbeVerdict(
 		ctx,
 		fastFailFiles,
 		proc.poolManager,
@@ -420,10 +444,23 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	missing := verdict.Missing
 	acceptableMissingPercent := cfg.GetAcceptableMissingSegmentsPercentage()
 
 	var results []validation.FastFailFileResult
-	if !missing {
+	switch {
+	case verdict.Dead:
+		// Every sampled article of the first wave is gone: the per-file sweep
+		// would only re-learn that with hundreds more STATs, each a slow 430
+		// lookup left pipelined on the connections for the next import to
+		// queue behind.
+		if proc.log != nil {
+			proc.log.InfoContext(ctx, "Fast-fail release probe judged the release dead; skipping the per-file sweep",
+				"files", len(fastFailFiles),
+				"probe_duration", time.Since(probeStart))
+		}
+		results = validation.DeadReleaseResults(fastFailFiles, verdict.MissingIDs)
+	case !missing:
 		// The provider has everything the NZB lists. Gaps the NZB itself
 		// declares are mapped from their placeholders without a STAT; the
 		// per-file sweep would only re-learn what the probe just answered.
@@ -441,7 +478,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 				"files", len(fastFailFiles),
 				"duration", time.Since(probeStart))
 		}
-	} else {
+	default:
 		isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
 		if isStremioImport && cfg.Stremio.EffectiveFastFailHeaderOnly() {
 			if proc.log != nil {
