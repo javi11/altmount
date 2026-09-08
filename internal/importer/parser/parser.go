@@ -31,6 +31,7 @@ import (
 	"github.com/kipsilabs/altmount/internal/metadata"
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/pool"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/kipsilabs/altmount/internal/progress"
 	"github.com/kipsilabs/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
@@ -75,10 +76,23 @@ type FirstSegmentData struct {
 	FirstArticleMissingID string
 }
 
-// SegmentStore is where decoded articles are kept for the streaming readers.
-// The parser only ever writes to it.
+// SegmentStore is where decoded articles are kept for the streaming readers:
+// warm-up writes the articles it fetches, and the PAR2 index read serves from
+// it. Mirrors usenet.SegmentStore.
 type SegmentStore interface {
+	Get(messageID string) ([]byte, bool)
 	Put(messageID string, data []byte) error
+}
+
+// resolvedStore is the current segment store, or nil when caching is off.
+func (p *Parser) resolvedStore() usenet.SegmentStore {
+	if p.segmentStore == nil {
+		return nil
+	}
+	if store := p.segmentStore(); store != nil {
+		return store
+	}
+	return nil
 }
 
 // Parser handles NZB file parsing
@@ -256,7 +270,7 @@ func (p *Parser) ParseNzb(ctx context.Context, n *nzbparser.Nzb, nzbPath string,
 				par2Descriptors = cached
 				return nil
 			}
-			par2Descriptors, par2Err = par2.GetFileDescriptors(gctx, par2Cache, p.poolManager)
+			par2Descriptors, par2Err = par2.GetFileDescriptors(gctx, par2Cache, p.poolManager, p.resolvedStore())
 			if par2Err == nil {
 				p.heads.putDescriptors(key, par2Descriptors)
 			}
@@ -1005,10 +1019,9 @@ func (p *Parser) WarmFirstSegments(ctx context.Context, files []nzbparser.NzbFil
 	}
 	maxFetch := max(min(min(len(files), p.getConfig().TotalProviderConnections()), maxFetchGoroutines), 1)
 	warm := concpool.New().WithMaxGoroutines(maxFetch).WithContext(ctx)
-	primary := p.primaryVideoToWarm(files)
 	for i := range files {
 		file := &files[i]
-		if len(file.Segments) == 0 || (shouldSkipFirstSegmentFetch(file) && i != primary) {
+		if len(file.Segments) == 0 || shouldSkipFirstSegmentFetch(file) {
 			continue
 		}
 		id := file.Segments[0].ID
@@ -1017,13 +1030,58 @@ func (p *Parser) WarmFirstSegments(ctx context.Context, files []nzbparser.NzbFil
 			return nil
 		})
 	}
-	for _, id := range p.sevenZipTailToWarm(files) {
+	// The parse fetches one middle segment's yEnc header for the release-wide
+	// part size, after every first segment is in; fetched here it overlaps the
+	// probe and the parse finds it in the head cache.
+	if seg, groups, ok := representativeMiddleSegment(files); ok {
 		warm.Go(func(ctx context.Context) error {
-			_, _ = p.fetchBodyWithRetry(ctx, cp, id)
+			_, _ = p.fetchYencHeaders(ctx, seg, groups)
 			return nil
 		})
 	}
+
+	// Store-only fetches: nothing in the parse reads them, so they run behind
+	// the wait the parse blocks on, detached from the caller's cancellation
+	// (which fires as soon as the awaited warm-up returns) but bounded.
+	var storeOnly []string
+	if primary := p.primaryVideoToWarm(files); primary >= 0 {
+		storeOnly = append(storeOnly, files[primary].Segments[0].ID)
+	}
+	storeOnly = append(storeOnly, p.sevenZipTailToWarm(files)...)
+	if len(storeOnly) > 0 {
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeOnlyWarmTimeout)
+		go func() {
+			defer cancel()
+			fill := concpool.New().WithMaxGoroutines(maxFetch).WithContext(bg)
+			for _, id := range storeOnly {
+				fill.Go(func(ctx context.Context) error {
+					_, _ = p.fetchBodyWithRetry(ctx, cp, id)
+					return nil
+				})
+			}
+			_ = fill.Wait()
+		}()
+	}
 	_ = warm.Wait()
+}
+
+// storeOnlyWarmTimeout bounds the detached warm fetches that only fill the
+// segment store.
+const storeOnlyWarmTimeout = 20 * time.Second
+
+// representativeMiddleSegment mirrors pickRepresentativeMiddleSegment on the
+// raw NZB: the second segment of the first file with at least three, skipping
+// files whose first segment is a declared gap. The parse re-derives its own
+// choice from what it actually fetched; this only warms the likely answer.
+func representativeMiddleSegment(files []nzbparser.NzbFile) (nzbparser.NzbSegment, []string, bool) {
+	for i := range files {
+		f := &files[i]
+		if len(f.Segments) < 3 || holes.IsPlaceholderID(f.Segments[0].ID) || holes.IsPlaceholderID(f.Segments[1].ID) {
+			continue
+		}
+		return f.Segments[1], f.Groups, true
+	}
+	return nzbparser.NzbSegment{}, nil, false
 }
 
 // sevenZipTailToWarm is the last two segment ids of the highest-numbered
