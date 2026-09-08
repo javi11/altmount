@@ -65,7 +65,7 @@ func statIDsWithBoundedRetries(
 		reported := make(map[string]bool, len(remaining))
 		transient := make(map[string]error, len(remaining))
 
-		for result := range client.StatMany(statCtx, remaining, nntppool.StatManyOptions{Concurrency: maxConnections}) {
+		for result := range hedgedStatMany(statCtx, client, remaining, maxConnections) {
 			if _, wanted := seen[result.MessageID]; !wanted {
 				continue
 			}
