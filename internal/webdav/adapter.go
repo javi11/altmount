@@ -150,7 +150,10 @@ func (h *webdavMethods) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	tracked := &readTracker{File: f}
 	http.ServeContent(w, r, fi.Name(), fi.ModTime(), tracked)
-	if tracked.err != nil {
+	// A client that hangs up cancels the request context and the reader
+	// surfaces that cancellation; only a body cut short while the client was
+	// still listening is a server-side failure worth a warning.
+	if tracked.err != nil && ctx.Err() == nil {
 		slog.WarnContext(ctx, "WebDAV stream ended on read error",
 			"path", reqPath,
 			"range", r.Header.Get("Range"),

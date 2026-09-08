@@ -137,3 +137,22 @@ func TestHandleGetDoesNotWarnOnCleanRead(t *testing.T) {
 		t.Fatalf("unexpected WARN on a clean read:\n%s", logs.String())
 	}
 }
+
+// A client that hangs up mid-stream is not a server-side failure: the reader
+// surfaces the request's own cancellation, and that must not be logged as a
+// read error.
+func TestHandleGetDoesNotWarnWhenClientCancels(t *testing.T) {
+	logs := captureLogs(t)
+	file := &failingFile{size: 4 << 20, failAt: 1 << 20, failErr: context.Canceled}
+	methods := &webdavMethods{fs: singleFileFS{file: file}, prefix: "/webdav/"}
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/webdav/bench/movie.mkv", nil).WithContext(ctx)
+	req.Header.Set("Range", "bytes=0-")
+	rec := httptest.NewRecorder()
+	cancel()
+	methods.handleGet(rec, req)
+
+	if strings.Contains(logs.String(), "level=WARN") {
+		t.Fatalf("client cancellation logged as a read error:\n%s", logs.String())
+	}
+}
