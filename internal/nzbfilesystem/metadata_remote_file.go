@@ -1075,6 +1075,24 @@ func (mvf *MetadataVirtualFile) classifyReadError(readErr error) error {
 	return readErr
 }
 
+// truncatedTailError describes a file whose advertised size extends past the
+// bytes its articles actually hold: a reader built at `at` produced nothing
+// and rebuilding it cannot help. The bytes from `at` to FileSize are gone for
+// good, so this is a permanent data corruption (NoRetry) that the health
+// pipeline must record and hand to repair. Without that verdict every client
+// that wants the tail (MKV cues live there) re-fetches the final article on
+// each attempt and retries indefinitely — the 15-requests-per-second storm
+// seen in the field. The error still unwraps to io.ErrUnexpectedEOF.
+func (mvf *MetadataVirtualFile) truncatedTailError(at int64) error {
+	return &usenet.DataCorruptionError{
+		UnderlyingErr: fmt.Errorf("%w: reader ended at offset %d before the requested end (file advertises %d bytes)",
+			io.ErrUnexpectedEOF, at, mvf.meta.FileSize),
+		BytesRead:  at,
+		NoRetry:    true,
+		FileOffset: at,
+	}
+}
+
 // segmentOffsetIndex provides O(1) lookup for offset→segment mapping using binary search
 type segmentOffsetIndex struct {
 	offsets []int64 // Cumulative start offset of each segment in file coordinates
@@ -1212,7 +1230,7 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				// the range end; rotating once more would spin here holding mvf.mu.
 				if totalRead == 0 && mvf.position == stalledAt {
 					mvf.closeCurrentReader()
-					return n, fmt.Errorf("%w: reader ended at offset %d before the requested end", io.ErrUnexpectedEOF, mvf.position)
+					return n, mvf.classifyReadError(mvf.truncatedTailError(mvf.position))
 				}
 				stalledAt = mvf.position
 				// Close current reader and try to get a new one for the next range in next iteration
@@ -1363,7 +1381,7 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 					// same offset cannot reach the range end.
 					at := off + int64(n)
 					if rn == 0 && at == stalledAt {
-						sharedErr = fmt.Errorf("%w: reader ended at offset %d before the requested end", io.ErrUnexpectedEOF, at)
+						sharedErr = mvf.truncatedTailError(at)
 						break
 					}
 					stalledAt = at
@@ -1451,6 +1469,13 @@ ephemeral:
 	n, err = readFullContext(readCtx, reader, buf)
 	if err == io.ErrUnexpectedEOF {
 		err = nil
+	}
+	// The window lies inside the advertised file, yet a fresh reader at its
+	// start had nothing at all: the data behind this offset does not exist
+	// (a truncated final article). Report it as corruption so the client
+	// gets a definitive answer instead of a short read it will retry forever.
+	if n == 0 && errors.Is(err, io.EOF) && off < mvf.meta.FileSize {
+		err = mvf.truncatedTailError(off)
 	}
 
 	// Only update the shared cursor when the shared reader was torn down.
