@@ -285,6 +285,9 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 	}
 
 	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
+	if stream != nil {
+		ctx = context.WithValue(ctx, utils.StreamIDKey, stream.ID)
+	}
 
 	file, err := f.cfg.NzbFs.Open(ctx, clean)
 	if err != nil {
