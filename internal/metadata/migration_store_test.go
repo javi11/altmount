@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javi11/nzbparser"
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/nzb"
-	"github.com/javi11/nzbparser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func legacyMeta(virtualPath string, meta *metapb.FileMetadata) LegacyMeta {
@@ -89,6 +90,30 @@ func TestSynthesizeStore_RejectsEmptySegmentID(t *testing.T) {
 	_, _, err := synthesizeStore([]LegacyMeta{legacyMeta("movies/Bad.mkv", m)}, "alt.binaries.misc")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "empty segment id")
+}
+
+func TestSynthesizeStore_FilenameUTF8(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"acci\xf3n.mkv", "acci\ufffdn.mkv"},
+		{"truncated\xc3.mkv", "truncated\ufffd.mkv"},
+		{"bad\xff\xfe.mkv", "bad\ufffd.mkv"},
+		{"acción-日本語.mkv", "acción-日本語.mkv"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, index, err := synthesizeStore([]LegacyMeta{legacyMeta(filepath.Join("movies", tc.name), &metapb.FileMetadata{
+				SegmentData: []*metapb.SegmentData{{Id: "s1@n", SegmentSize: 100, EndOffset: 99}},
+			})}, "alt.binaries.misc")
+			require.NoError(t, err)
+			_, err = proto.Marshal(store)
+			require.NoError(t, err, "filesystem filename must be safe to store as a protobuf subject")
+			assert.Equal(t, tc.want, store.Files[0].Subject)
+			assert.Equal(t, "s1@n", store.Files[0].Segments[0].Id)
+			assert.EqualValues(t, 0, index["s1@n"])
+		})
+	}
 }
 
 func TestStoreHashPath_StableAndContentAddressed(t *testing.T) {

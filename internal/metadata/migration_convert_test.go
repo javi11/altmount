@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -20,6 +21,43 @@ func readResolved(t *testing.T, ms *MetadataService, virtualPath string) *metapb
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	return got
+}
+
+func TestMigrateGroup_InvalidUTF8Filename(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("filesystem does not support invalid UTF-8 filename bytes")
+	}
+	root := t.TempDir()
+	ms := NewMetadataService(root)
+	vpath := filepath.Join("movies", "acci\xf3n.mkv")
+	meta := &metapb.FileMetadata{
+		FileSize: 100, SourceNzbPath: filepath.Join(t.TempDir(), "missing.nzb"),
+		SegmentData: []*metapb.SegmentData{{Id: "s1@n", SegmentSize: 100, StartOffset: 10, EndOffset: 99}},
+	}
+	require.NoError(t, ms.WriteFileMetadata(vpath, meta))
+	groups, err := ms.ScanLegacyMetas()
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+
+	res, err := ms.MigrateGroup(context.Background(), groups[0], t.TempDir(), "alt.binaries.misc")
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.FilesMigrated)
+	assert.Zero(t, res.FilesFailed)
+	assert.False(t, res.Faithful)
+	assert.FileExists(t, filepath.Join(root, vpath+".meta"), "original filename bytes survive")
+
+	// Read through a fresh service to exercise the on-disk store, not its cache.
+	fresh := NewMetadataService(root)
+	got := readResolved(t, fresh, vpath)
+	assert.Equal(t, res.StoreRef, got.StoreRef)
+	require.Len(t, got.SegmentData, 1)
+	assert.True(t, proto.Equal(meta.SegmentData[0], got.SegmentData[0]))
+	store, err := fresh.store.ReadStore(res.StoreRef)
+	require.NoError(t, err)
+	assert.Equal(t, "acci\ufffdn.mkv", store.Files[0].Subject)
+	groups, err = fresh.ScanLegacyMetas()
+	require.NoError(t, err)
+	assert.Empty(t, groups)
 }
 
 func TestMigrateGroup_PreservesResolvedSegments(t *testing.T) {
