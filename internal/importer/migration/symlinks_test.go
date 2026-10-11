@@ -33,9 +33,22 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 
 	const (
 		sourceMountPath = "/mnt/nzbdav"
-		altmountPath    = "/mnt/altmount"
 		source          = "nzbdav"
 	)
+	altmountPath := t.TempDir()
+	for _, target := range []string{
+		"movies/Movie (2020)/Movie (2020).mkv",
+		"movies/Dry/Dry.mkv",
+		"tv/Show S01/Show.S01E01.mkv",
+	} {
+		path := filepath.Join(altmountPath, target)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("video"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	tests := []struct {
 		name                   string
@@ -111,9 +124,9 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			},
 			lookup:                 &mockLookup{paths: map[string]string{}},
 			wantScanned:            1,
-			wantMatched:             0,
-			wantRewritten:           0,
-			wantUnmatched:           0,
+			wantMatched:            0,
+			wantRewritten:          0,
+			wantUnmatched:          0,
 			wantSkippedWrongPrefix: 1,
 		},
 		{
@@ -216,7 +229,7 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			},
 		},
 		{
-			name:  "context cancellation stops walk",
+			name: "context cancellation stops walk",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
 				// Create one symlink so the walk has an entry to process.
