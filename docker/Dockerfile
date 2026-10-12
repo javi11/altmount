@@ -110,14 +110,14 @@ RUN apt-get update && \
         unzip && \
     echo "user_allow_other" >> /etc/fuse.conf && \
     case "$(uname -m)" in \
-        x86_64) ARCH=amd64; SHA256=aa2804e08f48250e71009c727124b6341cd0288465804a9a09d14663cabafbaa ;; \
-        aarch64) ARCH=arm64; SHA256=d0ad88ba4c8e285b7c9efa591e0ab643280a91741e13c27f3a9c0957ccfa5203 ;; \
-        armv7l) ARCH=arm; SHA256=17f3f07cfa17e065f0c3329149ba702bbaafdb87e7f00230830488d5391362f2 ;; \
+        x86_64) ARCH=amd64; SHA256=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702 ;; \
+        aarch64) ARCH=arm64; SHA256=7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10 ;; \
+        armv7l) ARCH=arm; SHA256=184ca0903eede5f627ed10f5b19c5e087273493285572e289e1561db496fbc98 ;; \
         *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
     esac && \
-    curl -O "https://downloads.rclone.org/v1.75.0/rclone-v1.75.0-linux-${ARCH}.zip" && \
-    echo "${SHA256}  rclone-v1.75.0-linux-${ARCH}.zip" | sha256sum -c - && \
-    unzip "rclone-v1.75.0-linux-${ARCH}.zip" && \
+    curl -O "https://downloads.rclone.org/v1.75.2/rclone-v1.75.2-linux-${ARCH}.zip" && \
+    echo "${SHA256}  rclone-v1.75.2-linux-${ARCH}.zip" | sha256sum -c - && \
+    unzip "rclone-v1.75.2-linux-${ARCH}.zip" && \
     cp rclone-*/rclone /usr/local/bin/ && \
     chmod +x /usr/local/bin/rclone && \
     rm -rf rclone-* && \
