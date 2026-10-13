@@ -53,11 +53,12 @@ func NewQueueRepository(db *sql.DB, d Dialect) *QueueRepository {
 // reach.
 func (r *QueueRepository) RemoveFromQueue(ctx context.Context, id int64) error {
 	return r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
-		if _, err := txRepo.db.ExecContext(ctx, `DELETE FROM import_queue WHERE id = ?`, id); err != nil {
-			return fmt.Errorf("failed to remove from queue: %w", err)
-		}
+		// Delete history first: deleting the queue first sets history.nzb_id to NULL.
 		if _, err := txRepo.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
 			return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
+		}
+		if _, err := txRepo.db.ExecContext(ctx, `DELETE FROM import_queue WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("failed to remove from queue: %w", err)
 		}
 		return nil
 	})
@@ -503,6 +504,15 @@ func (r *QueueRepository) GetImportHistory(ctx context.Context, days int) ([]*Im
 	return r.GetImportDailyStats(ctx, days)
 }
 
+// DeleteImportHistoryByNzbID rolls back only the history produced by this queue
+// item, preserving successful imports that share the same virtual directory.
+func (r *QueueRepository) DeleteImportHistoryByNzbID(ctx context.Context, nzbID int64) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, nzbID); err != nil {
+		return fmt.Errorf("failed to delete import history for queue item %d: %w", nzbID, err)
+	}
+	return nil
+}
+
 // AddImportHistory records a successful file import in the persistent history table
 func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
 	virtualPath := normalizeHealthPath(history.VirtualPath)
@@ -883,6 +893,14 @@ func (r *QueueRepository) DeleteFailedItemsOlderThan(ctx context.Context, olderT
 
 		if len(deletedItems) == 0 {
 			return nil
+		}
+
+		// Delete provisional history before its owning queue row: the foreign
+		// key may otherwise null nzb_id and resurrect an old failed import as
+		// Completed. Keep both deletions in this transaction.
+		if _, err := txRepo.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id IN
+			(SELECT id FROM import_queue WHERE status = 'failed' AND updated_at < ?)`, olderThan); err != nil {
+			return fmt.Errorf("failed to delete history for old failed queue items: %w", err)
 		}
 
 		// Single ranged DELETE — uses idx_queue_status_updated.

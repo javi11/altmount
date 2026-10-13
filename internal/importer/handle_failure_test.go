@@ -64,6 +64,7 @@ func newMoveToFailedTestService(t *testing.T) *Service {
 			UNIQUE(nzb_path)
 		);
 		CREATE INDEX IF NOT EXISTS idx_queue_nzb_path ON import_queue(nzb_path);
+ CREATE TABLE import_history (id INTEGER PRIMARY KEY, nzb_id INTEGER);
 	`)
 	require.NoError(t, err)
 

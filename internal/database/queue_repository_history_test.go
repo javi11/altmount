@@ -79,5 +79,8 @@ func TestQueueRepository_RemoveFromQueueBulk_SkipsProcessingAndItsHistory(t *tes
 
 	rows, err := repo.ListSABnzbdHistory(ctx, "", 100, 0)
 	require.NoError(t, err)
-	assert.Len(t, rows, 1, "a refused delete must leave the history row in place")
+	assert.Empty(t, rows, "provisional history stays hidden while the item is processing")
+	var count int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM import_history WHERE nzb_id = 8").Scan(&count))
+	assert.Equal(t, 1, count, "a refused delete must leave the stored history row in place")
 }

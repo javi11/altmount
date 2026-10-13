@@ -148,3 +148,92 @@ func TestSABnzbdHistory_PaginationAndCategory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 }
+
+func TestSABnzbdHistory_LiveQueueOwnsProvisionalHistory(t *testing.T) {
+	for _, status := range []string{"failed", "pending", "processing", "paused", "completed"} {
+		for _, skip := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/skip=%v", status, skip), func(t *testing.T) {
+				repo, db := newSABHistoryRepo(t)
+				insertQ(t, db, 5, status, "tv", time.Now(), skip)
+				insertH(t, db, 100, 5, "tv", time.Now())
+				insertH(t, db, 101, 5, "tv", time.Now()) // multi-file job
+				want := 0
+				if !skip && (status == "failed" || status == "completed") {
+					want = 1
+				}
+				total, err := repo.CountSABnzbdHistory(context.Background(), "tv")
+				require.NoError(t, err)
+				assert.Equal(t, want, total)
+				rows, err := repo.ListSABnzbdHistory(context.Background(), "tv", 100, 0)
+				require.NoError(t, err)
+				assert.Len(t, rows, want)
+			})
+		}
+	}
+}
+
+func TestFailedRetention_DoesNotResurrectLegacyHistory(t *testing.T) {
+	db, err := NewDB(Config{Type: "sqlite", DatabasePath: t.TempDir() + "/retention.db"})
+	require.NoError(t, err)
+	defer db.Close()
+	conn := db.Connection()
+	old := time.Now().Add(-48 * time.Hour)
+	insertQ(t, conn, 5, "failed", "tv", old, false)
+	insertH(t, conn, 100, 5, "tv", old)
+	insertH(t, conn, 101, 5, "tv", old)
+	insertQ(t, conn, 6, "completed", "tv", old, false)
+	insertH(t, conn, 102, 6, "tv", old)
+	insertQ(t, conn, 7, "failed", "tv", time.Now(), false)
+	insertH(t, conn, 103, 7, "tv", time.Now())
+	deleted, err := db.Repository.DeleteFailedItemsOlderThan(context.Background(), time.Now().Add(-24*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, deleted, 1)
+	var count int
+	require.NoError(t, conn.QueryRow("SELECT COUNT(*) FROM import_history WHERE nzb_name IN ('h100.nzb', 'h101.nzb')").Scan(&count))
+	assert.Zero(t, count)
+	require.NoError(t, conn.QueryRow("SELECT COUNT(*) FROM import_history WHERE nzb_id IN (6, 7)").Scan(&count))
+	assert.Equal(t, 2, count, "completed and recent history must survive retention")
+	rows, err := NewRepository(conn, db.Dialect()).ListSABnzbdHistory(context.Background(), "", 100, 0)
+	require.NoError(t, err)
+	assert.Len(t, rows, 2, "old failed history must not reappear as Completed")
+}
+
+func TestRemoveFromQueue_DeletesHistoryBeforeForeignKeyUnlinksIt(t *testing.T) {
+	for _, kind := range []string{"queue", "repository"} {
+		t.Run(kind, func(t *testing.T) {
+			db, err := NewDB(Config{Type: "sqlite", DatabasePath: t.TempDir() + "/remove.db"})
+			require.NoError(t, err)
+			defer db.Close()
+			conn := db.Connection()
+			insertQ(t, conn, 5, "failed", "tv", time.Now(), false)
+			insertH(t, conn, 100, 5, "tv", time.Now())
+			insertH(t, conn, 101, 5, "tv", time.Now())
+			repo := NewRepository(conn, db.Dialect())
+			remove := func() error {
+				if kind == "queue" {
+					return db.Repository.RemoveFromQueue(context.Background(), 5)
+				}
+				return repo.RemoveFromQueue(context.Background(), 5)
+			}
+			_, err = conn.Exec("CREATE TRIGGER fail_history_delete BEFORE DELETE ON import_history BEGIN SELECT RAISE(ABORT, 'history unavailable'); END")
+			require.NoError(t, err)
+			require.Error(t, remove(), "history deletion failure must keep the owning queue row")
+			var count int
+			require.NoError(t, conn.QueryRow("SELECT COUNT(*) FROM import_queue WHERE id = 5").Scan(&count))
+			assert.Equal(t, 1, count)
+			require.NoError(t, conn.QueryRow("SELECT COUNT(*) FROM import_history WHERE nzb_id = 5").Scan(&count))
+			assert.Equal(t, 2, count)
+			_, err = conn.Exec("DROP TRIGGER fail_history_delete")
+			require.NoError(t, err)
+			if kind == "queue" {
+				err = db.Repository.RemoveFromQueue(context.Background(), 5)
+			} else {
+				err = repo.RemoveFromQueue(context.Background(), 5)
+			}
+			require.NoError(t, err)
+			rows, err := repo.ListSABnzbdHistory(context.Background(), "", 100, 0)
+			require.NoError(t, err)
+			assert.Empty(t, rows, "queue removal must not orphan Completed histories via ON DELETE SET NULL")
+		})
+	}
+}

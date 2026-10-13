@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/nzbparser"
 	"github.com/kipsilabs/altmount/internal/arrs"
 	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/contentverify"
@@ -34,11 +35,10 @@ import (
 	"github.com/kipsilabs/altmount/internal/nzbfile"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/progress"
-	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/kipsilabs/altmount/internal/sabnzbd"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/kipsilabs/altmount/internal/utils"
 	"github.com/kipsilabs/altmount/pkg/rclonecli"
-	"github.com/javi11/nzbparser"
 )
 
 // ServiceConfig holds configuration for the NZB import service
@@ -1536,6 +1536,15 @@ func (s *Service) cleanupHealthRecords(ctx context.Context, itemID int64, virtua
 
 // handleProcessingFailure handles when processing fails
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
+	// Processor history is provisional until verification and post-processing
+	// succeed. Roll it back for every failure/deferral, including cancellation,
+	// before a fallback or retention cleanup can remove the owning queue row.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := s.database.Repository.DeleteImportHistoryByNzbID(cleanupCtx, item.ID); err != nil {
+		s.log.ErrorContext(ctx, "Failed to roll back import history", "queue_id", item.ID, "error", err)
+	}
+
 	// A deferral is not a failure: the release is parked while a PAR2 repair
 	// rebuilds its missing articles. The repair service returns it to pending
 	// on success, or fails it when the damage proves unrepairable.

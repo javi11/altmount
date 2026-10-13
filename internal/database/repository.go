@@ -504,6 +504,10 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	// (issue #586). Deleting the queue row alone would also be unrecoverable —
 	// a retry can no longer find the item to clean up after.
 	return r.WithTransaction(ctx, func(tx *Repository) error {
+		// Delete history first: deleting the queue first sets history.nzb_id to NULL.
+		if _, err := tx.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
+			return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
+		}
 		result, err := tx.db.ExecContext(ctx, `DELETE FROM import_queue WHERE id = ?`, id)
 		if err != nil {
 			return fmt.Errorf("failed to remove from queue: %w", err)
@@ -516,10 +520,6 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 
 		if rowsAffected == 0 {
 			return sql.ErrNoRows
-		}
-
-		if _, err := tx.db.ExecContext(ctx, `DELETE FROM import_history WHERE nzb_id = ?`, id); err != nil {
-			return fmt.Errorf("failed to remove import history for queue item %d: %w", id, err)
 		}
 
 		return nil
@@ -1339,11 +1339,12 @@ type SABnzbdHistoryRow struct {
 
 // sabnzbdHistoryUnion builds the deduplicated UNION-ALL body shared by
 // ListSABnzbdHistory and CountSABnzbdHistory, plus its bound args (the category
-// filter, repeated once per arm). A completed import can exist in both
-// import_queue (status=completed, never auto-pruned) and import_history; the
-// anti-join drops the history copy when the live completed queue row is present,
-// so each import is counted once. Failed items live only in import_queue and are
-// unaffected. Portable across SQLite + Postgres (no window functions, no
+// filter, repeated once per arm). The live queue owns the job's status until
+// it is removed: processors write provisional history before verification and
+// post-processing finish. Suppress that history for every live queue state,
+// including failed, retried and notification-suppressed jobs. This also hides
+// stale history left by older versions without deleting successful archives.
+// Portable across SQLite + Postgres (no window functions, no
 // basename/regexp); ? placeholders and FALSE are rewritten by the dialect layer.
 func sabnzbdHistoryUnion(category string) (string, []any) {
 	body := `
@@ -1359,7 +1360,7 @@ func sabnzbdHistoryUnion(category string) (string, []any) {
 		       h.completed_at
 		  FROM import_history h
 		  LEFT JOIN import_queue q
-		    ON q.id = h.nzb_id AND q.status = 'completed' AND q.skip_arr_notification = FALSE
+		    ON q.id = h.nzb_id
 		 WHERE q.id IS NULL
 		   AND (? = '' OR LOWER(h.category) = LOWER(?))
 		UNION ALL
