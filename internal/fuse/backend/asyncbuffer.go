@@ -129,8 +129,8 @@ type AsyncReadBuffer struct {
 
 	// Ring buffer — allocated on promotion, freed on demotion/close.
 	buf     []byte
-	readPos int   // read cursor in ring buffer
-	filled  int   // bytes currently buffered
+	readPos int   // start of retained window in ring buffer
+	filled  int   // bytes retained (history plus read-ahead)
 	baseOff int64 // absolute file offset corresponding to readPos
 	fillOff int64 // absolute file offset of the next fill read
 
@@ -200,7 +200,7 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 		// Offset already within the buffered window.
 		if off >= a.baseOff && off < bufEnd {
 			n := a.copyFromBuffer(p, off)
-			a.expectedNext = off + int64(n)
+			a.expectedNext = max(a.expectedNext, off+int64(n))
 			a.mu.Unlock()
 			return n, nil
 		}
@@ -215,7 +215,7 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 			}
 			if a.servableLocked(gen, off) {
 				n := a.copyFromBuffer(p, off)
-				a.expectedNext = off + int64(n)
+				a.expectedNext = max(a.expectedNext, off+int64(n))
 				a.mu.Unlock()
 				return n, nil
 			}
@@ -240,7 +240,7 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 			}
 			if a.servableLocked(gen, off) {
 				n := a.copyFromBuffer(p, off)
-				a.expectedNext = off + int64(n)
+				a.expectedNext = max(a.expectedNext, off+int64(n))
 				a.mu.Unlock()
 				return n, nil
 			}
@@ -272,9 +272,13 @@ func (a *AsyncReadBuffer) ReadAtContext(ctx context.Context, p []byte, off int64
 	n, err := a.src.ReadAtContext(ctx, p, off)
 
 	a.mu.Lock()
-	a.expectedNext = off + int64(n)
-	if shouldPromote && n > 0 && !a.closed && !a.streaming {
-		a.promoteLocked(off + int64(n))
+	// Another probe may have promoted while this source read was in flight.
+	// Its completion must not move the active ring's served frontier.
+	if !a.streaming {
+		a.expectedNext = off + int64(n)
+		if shouldPromote && n > 0 && !a.closed {
+			a.promoteLocked(off + int64(n))
+		}
 	}
 	a.mu.Unlock()
 	return n, err
@@ -479,27 +483,31 @@ func (a *AsyncReadBuffer) markSourceDoneIfCanceledLocked() {
 	}
 }
 
-// copyFromBuffer copies buffered data into p starting at file offset off,
-// draining consumed bytes from the ring. Caller must hold a.mu and must have
-// verified off is within [baseOff, baseOff+filled).
+// copyFromBuffer copies from the retained ring window. Keep a bounded
+// history behind the highest served offset: concurrent kernel reads can finish
+// out of order, so skipping to a later offset does not mean its prefix was read.
+// History uses the existing allocation and leaves at least half for read-ahead.
+// Caller must hold a.mu and verify off is within [baseOff, baseOff+filled).
 func (a *AsyncReadBuffer) copyFromBuffer(p []byte, off int64) int {
-	// Skip any bytes between baseOff and off (already-consumed prefix).
-	if skip := int(off - a.baseOff); skip > 0 {
-		a.readPos = (a.readPos + skip) % a.bufSize
-		a.filled -= skip
-		a.baseOff += int64(skip)
-	}
-
-	n := min(len(p), a.filled)
-	first := min(n, a.bufSize-a.readPos)
-	copy(p[:first], a.buf[a.readPos:a.readPos+first])
+	rel := int(off - a.baseOff)
+	n := min(len(p), a.filled-rel)
+	pos := (a.readPos + rel) % a.bufSize
+	first := min(n, a.bufSize-pos)
+	copy(p[:first], a.buf[pos:pos+first])
 	if first < n {
 		copy(p[first:n], a.buf[:n-first])
 	}
-	a.readPos = (a.readPos + n) % a.bufSize
-	a.filled -= n
-	a.baseOff += int64(n)
-	a.cond.Signal() // room available — wake fill goroutine
+
+	history := min(nearFrontierWindow, a.bufSize/2)
+	// An older read must neither move the frontier backwards nor evict more
+	// history. expectedNext is updated by the caller after copying.
+	frontier := max(a.expectedNext, off+int64(n))
+	if discard := int(frontier - int64(history) - a.baseOff); discard > 0 {
+		a.readPos = (a.readPos + discard) % a.bufSize
+		a.filled -= discard
+		a.baseOff += int64(discard)
+		a.cond.Signal() // room available — wake fill goroutine
+	}
 	return n
 }
 
