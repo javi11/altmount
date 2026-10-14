@@ -56,7 +56,7 @@ The per-user **API key** (visible in **System → Settings**) is only honoured b
 
 | Endpoint | Accepts |
 |----------|---------|
-| `/api/sabnzbd/*` — SABnzbd-compatible API | `?apikey=` or `ma_username` + `ma_password` |
+| `/sabnzbd` — SABnzbd-compatible API | `?apikey=` or `ma_username` + `ma_password` |
 | `POST /api/arrs/webhook` — Sonarr/Radarr webhook | `?apikey=` (required) |
 | `POST /api/import/file` — manual NZB file import | `?apikey=` (required) |
 
@@ -83,9 +83,28 @@ The Stremio addon is **not** authenticated with the API key. It uses a separate 
 | **Auth** | `/api/auth` | Login, registration, auth config |
 | **User** | `/api/user` | Current user info, token refresh, API key management |
 
+## SABnzbd History
+
+`GET /sabnzbd?mode=history&output=json&apikey=YOUR_API_KEY` returns completed and failed jobs in the SABnzbd response format (`history.slots` and `history.noofslots`).
+
+The normal history page is ordered newest first. `start` is the offset (default `0`), and `limit` is the page size (default `100`, capped at `1000`). Use `category` to filter jobs by category.
+
+For Sonarr/Radarr compatibility, the first page (`start=0`, including when omitted) also appends up to **1,000 retained failed jobs** that are absent from the normal page. Sonarr/Radarr poll the first page, so this keeps older failures visible during bursts of newer completed jobs. The extra jobs use the same category filter and exclude jobs marked `skip_arr_notification`; their availability follows the failed-job retention policy.
+
+This behavior applies to **all clients** calling this endpoint, without client detection:
+
+- The first page can contain more jobs than the requested `limit`. Extra failures are appended after the normal page, so the complete response may not be in chronological order.
+- A failed job appended to the first page can appear again at its normal position on a later page. Clients traversing pages should deduplicate by `nzo_id`.
+- `history.noofslots` remains the total number of unique jobs in the filtered history, rather than the number of slots returned on the first page.
+- Later pages (`start>0`) retain normal pagination. Requests with `nzo_ids` use direct job lookup and do not append unrelated failures.
+
+For example, `start=0&limit=5` can return the five newest completed jobs plus an older failed job, for six slots in total.
+
+The frontend queue (`/api/queue`) and import history (`/api/import/history`) use separate endpoints; this first-page behavior does not change their ordering or pagination.
+
 ## Response Format
 
-All endpoints return a consistent JSON envelope:
+REST endpoints under `/api` return a consistent JSON envelope:
 
 ```json
 { "success": true, "data": { ... } }

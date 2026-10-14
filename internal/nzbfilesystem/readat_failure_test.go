@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/nntppool/v5"
 	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/database"
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
 	"github.com/kipsilabs/altmount/internal/testsupport/segments"
-	"github.com/javi11/nntppool/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,12 +130,20 @@ func TestReadAtContext_StalledFetch_TimesOut(t *testing.T) {
 	ctx := context.Background()
 	fp := fakepool.New()
 	configurePoolForFile(fp, segCount, segSize, fakepool.SegmentBehavior{})
-	fp.BlockUntil(make(chan struct{})) // never released, never cancelled
+	gate := make(chan struct{})
+	fp.BlockUntil(gate)
+	t.Cleanup(func() { close(gate) })
 
 	cfg := config.DefaultConfig()
 	cfg.Streaming.ReadTimeoutSeconds = 1
 
 	mvf := withConfig(newTestMVF(t, ctx, fp, segCount, segSize, 2), cfg)
+	// Other readers share in-flight articles by message ID. Keep the stalled
+	// articles separate so a successful fetch cannot bypass this pool.
+	for i, seg := range mvf.meta.SegmentData {
+		seg.Id = t.Name() + "-" + seg.Id
+		fp.SetBehavior(seg.Id, fakepool.SegmentBehavior{Bytes: segments.Payload(i, segSize)})
+	}
 
 	type result struct {
 		n   int
@@ -170,12 +178,20 @@ func TestReadAtContext_StalledEphemeralFetch_TimesOut(t *testing.T) {
 	ctx := context.Background()
 	fp := fakepool.New()
 	configurePoolForFile(fp, segCount, segSize, fakepool.SegmentBehavior{})
-	fp.BlockUntil(make(chan struct{})) // never released, never cancelled
+	gate := make(chan struct{})
+	fp.BlockUntil(gate)
+	t.Cleanup(func() { close(gate) })
 
 	cfg := config.DefaultConfig()
 	cfg.Streaming.ReadTimeoutSeconds = 1
 
 	mvf := withConfig(newTestMVF(t, ctx, fp, segCount, segSize, 2), cfg)
+	// Other readers share in-flight articles by message ID. Keep the stalled
+	// articles separate so a successful fetch cannot bypass this pool.
+	for i, seg := range mvf.meta.SegmentData {
+		seg.Id = t.Name() + "-" + seg.Id
+		fp.SetBehavior(seg.Id, fakepool.SegmentBehavior{Bytes: segments.Payload(i, segSize)})
+	}
 
 	done := make(chan error, 1)
 	go func() {
