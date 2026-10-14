@@ -181,6 +181,7 @@ func (s *Server) handleMigrateNzbdavSymlinks(c *fiber.Ctx) error {
 		"rewritten":            report.Rewritten,
 		"skipped_wrong_prefix": report.SkippedWrongPrefix,
 		"unmatched":            report.Unmatched,
+		"missing_targets":      report.MissingTargets,
 		"errors":               report.Errors,
 		"dry_run":              req.DryRun,
 	})
