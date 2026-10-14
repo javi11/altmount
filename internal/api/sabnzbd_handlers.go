@@ -1472,7 +1472,15 @@ func (s *Server) calculateItemBasePath() string {
 // stop Sonarr/Radarr from looping on FileNotFoundException for items whose
 // symlink under Import.ImportDir was never created (issue #596).
 func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, basePath string) (string, bool) {
-	if s.configManager == nil || item.StoragePath == nil || *item.StoragePath == "" {
+	// Failed jobs have no importable content, even when a retry or failed
+	// post-processing left a storage path behind. Never expose the import root.
+	if item.Status == database.QueueStatusFailed {
+		return "", false
+	}
+	if item.StoragePath == nil || *item.StoragePath == "" {
+		return "", false
+	}
+	if s.configManager == nil {
 		return basePath, true
 	}
 
