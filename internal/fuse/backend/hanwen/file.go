@@ -66,10 +66,26 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EACCES
 	}
 
+	// Register before opening so the downloader can attribute NNTP bytes to
+	// this handle without creating a second stream in the metadata layer.
+	fileSize := f.size.Load()
+	if fi, statErr := f.nzbfs.Stat(ctx, f.path); statErr == nil {
+		fileSize = fi.Size()
+	}
+	var stream *nzbfilesystem.ActiveStream
+	if f.streamTracker != nil {
+		stream = f.streamTracker.AddStream(f.path, "FUSE", "FUSE", "", "", fileSize)
+	}
 	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
+	if stream != nil {
+		ctx = context.WithValue(ctx, utils.StreamIDKey, stream.ID)
+	}
 
 	aferoFile, err := f.nzbfs.Open(ctx, f.path)
 	if err != nil {
+		if stream != nil {
+			f.streamTracker.Remove(stream.ID)
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			f.logger.DebugContext(ctx, "File Open canceled", "path", f.path)
 			return nil, 0, syscall.EINTR
@@ -79,18 +95,9 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 
-	fileSize := f.size.Load()
 	if fi, statErr := aferoFile.Stat(); statErr == nil {
 		fileSize = fi.Size()
 		f.size.Store(fileSize)
-	}
-
-	// Create a FUSE-level stream (one per file open) that lives for the
-	// duration of the handle. Backend opens are told to suppress their
-	// own stream creation via SuppressStreamTrackingKey.
-	var stream *nzbfilesystem.ActiveStream
-	if f.streamTracker != nil {
-		stream = f.streamTracker.AddStream(f.path, "FUSE", "FUSE", "", "", fileSize)
 	}
 
 	// Attach a read-ahead buffer for sufficiently large files. The buffer

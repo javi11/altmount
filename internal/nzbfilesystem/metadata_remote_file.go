@@ -247,16 +247,14 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 	// Start tracking stream if tracker available
 	streamID := ""
-	if suppress, _ := ctx.Value(utils.SuppressStreamTrackingKey).(bool); suppress {
-		// Stream tracking handled at caller level (e.g. FUSE Handle)
-		streamID = ""
-	} else if mrf.streamTracker != nil {
+	suppressTracking, _ := ctx.Value(utils.SuppressStreamTrackingKey).(bool)
+	if mrf.streamTracker != nil {
 		// Check if we already have a stream ID in context
 		if id, ok := ctx.Value(utils.StreamIDKey).(string); ok && id != "" {
 			streamID = id
-		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*ActiveStream); ok {
+		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*ActiveStream); ok && stream != nil {
 			streamID = stream.ID
-		} else {
+		} else if !suppressTracking {
 			// Check for source and username in context
 			source := "FUSE"
 			if s, ok := ctx.Value(utils.StreamSourceKey).(string); ok && s != "" {
@@ -329,6 +327,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		globalSalt:       mrf.getGlobalSalt(),
 		streamTracker:    mrf.streamTracker,
 		streamID:         streamID,
+		suppressTracking: suppressTracking,
 		segmentStore:     mrf.resolveSegmentStore(),
 	}
 
@@ -883,6 +882,8 @@ type MetadataVirtualFile struct {
 	globalSalt       string
 	streamTracker    StreamTracker
 	streamID         string
+	// The caller owns OUT metrics and stream lifetime; streamID still attributes NNTP downloads.
+	suppressTracking bool
 	segmentStore     usenet.SegmentStore // optional segment cache
 	segmentIndexOnce sync.Once           // guards lazy init of segmentIndex
 
@@ -1238,7 +1239,7 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		n += totalRead
 		mvf.position += int64(totalRead)
 
-		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+		if totalRead > 0 && !mvf.suppressTracking && mvf.streamTracker != nil && mvf.streamID != "" {
 			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
 			mvf.streamTracker.UpdateCurrentOffset(mvf.streamID, mvf.position)
 
@@ -1391,7 +1392,7 @@ func (mvf *MetadataVirtualFile) ReadAtContext(readCtx context.Context, p []byte,
 			rn, readErr := mvf.reader.Read(buf[n:])
 			n += rn
 
-			if n > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+			if n > 0 && !mvf.suppressTracking && mvf.streamTracker != nil && mvf.streamID != "" {
 				mvf.streamTracker.UpdateProgress(mvf.streamID, int64(rn))
 				mvf.streamTracker.UpdateCurrentOffset(mvf.streamID, off+int64(n))
 				if mvf.bufOffReader != nil {
@@ -1774,7 +1775,7 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 		if !mvf.rangeUnsatisfiable {
 			mvf.originalRangeEnd = 0
 		}
-		if mvf.streamTracker != nil && mvf.streamID != "" {
+		if !mvf.suppressTracking && mvf.streamTracker != nil && mvf.streamID != "" {
 			mvf.streamTracker.UpdateCurrentOffset(mvf.streamID, abs)
 		}
 	}
@@ -1801,7 +1802,7 @@ func (mvf *MetadataVirtualFile) Close() error {
 	// Remove from stream tracker under the same lock that Read / ReadAtContext
 	// use to read streamID. Without this, the race detector flags an
 	// unsynchronized read/write between Close and a concurrent Read.
-	if mvf.streamTracker != nil && mvf.streamID != "" {
+	if !mvf.suppressTracking && mvf.streamTracker != nil && mvf.streamID != "" {
 		mvf.streamTracker.Remove(mvf.streamID)
 		mvf.streamID = ""
 	}

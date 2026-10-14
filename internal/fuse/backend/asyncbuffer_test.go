@@ -22,7 +22,8 @@ type countingSource struct {
 	delay   time.Duration
 	readErr error // error to return once data is exhausted (nil → io.EOF)
 
-	reads atomic.Int64
+	reads     atomic.Int64
+	bytesRead atomic.Int64
 }
 
 func (m *countingSource) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
@@ -41,6 +42,7 @@ func (m *countingSource) ReadAtContext(ctx context.Context, p []byte, off int64)
 		return 0, io.EOF
 	}
 	n := copy(p, m.data[off:])
+	m.bytesRead.Add(int64(n))
 	return n, nil
 }
 
@@ -755,5 +757,180 @@ func TestAsyncReadBuffer_FrontierWaitFallsBackWhenFillStalls(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("frontier read never gave up on the wedged fill")
+	}
+}
+
+// A later kernel read may finish before an earlier read on the same handle.
+// Repeating this ordering must not refetch the skipped bytes or discard fills.
+func TestAsyncReadBuffer_ReorderedReadsDoNotRefetch(t *testing.T) {
+	const chunk = 128 * 1024
+	data := testData(32 * 1024 * 1024)
+	src := &countingSource{data: data}
+	a := NewAsyncReadBuffer(context.Background(), src, 8*1024*1024, int64(len(data)), nil)
+	defer a.Close()
+	read := func(off int64) {
+		t.Helper()
+		p := make([]byte, chunk)
+		n, err := a.ReadAtContext(context.Background(), p, off)
+		if err != nil || n != chunk || !bytes.Equal(p, data[off:off+chunk]) {
+			t.Fatalf("read at %d: n=%d err=%v, correct=%v", off, n, err, bytes.Equal(p[:n], data[off:off+int64(n)]))
+		}
+	}
+	for i := range armThreshold {
+		read(int64(i * chunk))
+	}
+	for off := int64(armThreshold * chunk); off < 16*1024*1024; off += 2 * chunk {
+		read(off + chunk)
+		before := src.reads.Load()
+		read(off)
+		// Streaming may independently fill, so measure resets as well as fetch
+		// calls: a delayed read must still be served by this generation.
+		a.mu.Lock()
+		streaming := a.streaming
+		a.mu.Unlock()
+		if !streaming {
+			t.Fatalf("delayed read at %d reset read-ahead (source reads %d -> %d)", off, before, src.reads.Load())
+		}
+	}
+	// Source traffic includes demand plus at most one buffer of read-ahead.
+	// Fill call sizes vary with scheduling as consumers free ring space.
+	if got := src.bytesRead.Load(); got > 24*1024*1024+2*chunk {
+		t.Fatalf("reordered stream read %d source bytes, exceeds demand plus bounded read-ahead", got)
+	}
+}
+
+func TestAsyncReadBuffer_ConcurrentReorderedReads(t *testing.T) {
+	const chunk = 1024
+	data := testData(256 * 1024)
+	src := &countingSource{data: data}
+	a := NewAsyncReadBuffer(context.Background(), src, 16*1024, int64(len(data)), nil)
+	defer a.Close()
+	for i := range armThreshold {
+		_, err := a.ReadAtContext(context.Background(), make([]byte, chunk), int64(i*chunk))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.mu.Lock()
+	gen := a.gen
+	a.mu.Unlock()
+	for off := armThreshold * chunk; off+4*chunk < len(data); off += 4 * chunk {
+		var wg sync.WaitGroup
+		for i := 3; i >= 0; i-- {
+			wg.Add(1)
+			go func(at int64) {
+				defer wg.Done()
+				p := make([]byte, chunk)
+				n, err := a.ReadAtContext(context.Background(), p, at)
+				if err != nil || n != chunk || !bytes.Equal(p, data[at:at+chunk]) {
+					t.Errorf("concurrent read at %d: n=%d err=%v, data correct=%v", at, n, err, bytes.Equal(p, data[at:at+chunk]))
+				}
+			}(int64(off + i*chunk))
+		}
+		wg.Wait()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.streaming || a.gen != gen {
+		t.Fatalf("concurrent read-ahead reset: generation %d -> %d", gen, a.gen)
+	}
+	if a.filled > a.bufSize || len(a.buf) != a.bufSize {
+		t.Fatal("retained history exceeded buffer allocation")
+	}
+}
+
+func TestAsyncReadBuffer_BackwardSeekBeyondHistoryDemotes(t *testing.T) {
+	data := testData(128 * 1024)
+	src := &countingSource{data: data}
+	a := NewAsyncReadBuffer(context.Background(), src, 16*1024, int64(len(data)), nil)
+	defer a.Close()
+	p := make([]byte, 1024)
+	for off := int64(0); off < 64*1024; off += 1024 {
+		n, err := a.ReadAtContext(context.Background(), p, off)
+		if err != nil || n != len(p) {
+			t.Fatalf("read: n=%d err=%v", n, err)
+		}
+	}
+	n, err := a.ReadAtContext(context.Background(), p, 0)
+	if err != nil || n != len(p) || !bytes.Equal(p, data[:len(p)]) {
+		t.Fatalf("backward seek: n=%d err=%v", n, err)
+	}
+	if a.GetBufferedOffset() != 0 {
+		t.Fatal("large backward seek should demote")
+	}
+}
+
+// A direct probe can already be in flight when other requests arm read-ahead.
+// Its eventual completion must not overwrite the active buffer's frontier.
+func TestAsyncReadBuffer_ProbeCompletionAfterPromotion(t *testing.T) {
+	data := testData(2 * 1024 * 1024)
+	entered, release := make(chan struct{}), make(chan struct{})
+	src := &delayedProbeSource{countingSource: countingSource{data: data}, entered: entered, release: release}
+	a := NewAsyncReadBuffer(context.Background(), src, 16*1024, int64(len(data)), nil)
+	defer a.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.ReadAtContext(context.Background(), make([]byte, 1024), 1024*1024)
+		done <- err
+	}()
+	<-entered
+	for i := range armThreshold {
+		_, err := a.ReadAtContext(context.Background(), make([]byte, 1024), int64(i*1024))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	p := make([]byte, 1024)
+	n, err := a.ReadAtContext(context.Background(), p, armThreshold*1024)
+	if err != nil || n != len(p) || !bytes.Equal(p, data[armThreshold*1024:(armThreshold+1)*1024]) {
+		t.Fatalf("buffered read after probe: n=%d err=%v", n, err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.filled < 0 || a.baseOff > a.fillOff || a.expectedNext > a.fillOff {
+		t.Fatalf("late probe corrupted ring: filled=%d base=%d fill=%d expected=%d", a.filled, a.baseOff, a.fillOff, a.expectedNext)
+	}
+}
+
+type delayedProbeSource struct {
+	countingSource
+	entered, release chan struct{}
+}
+
+func (s *delayedProbeSource) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
+	if off == 1024*1024 {
+		close(s.entered)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	return s.countingSource.ReadAtContext(ctx, p, off)
+}
+
+// Compare with the pre-fix implementation using an overlay to check whether
+// retaining history adds material overhead to a sequential memory-backed stream.
+func BenchmarkAsyncReadBufferSequential(b *testing.B) {
+	const size = 64 * 1024 * 1024
+	data := testData(size)
+	p := make([]byte, 128*1024)
+	b.SetBytes(size)
+	b.ResetTimer()
+	for range b.N {
+		src := &countingSource{data: data}
+		a := NewAsyncReadBuffer(context.Background(), src, 8*1024*1024, size, nil)
+		for off := int64(0); off < size; {
+			n, err := a.ReadAtContext(context.Background(), p, off)
+			if err != nil || n == 0 {
+				b.Fatalf("sequential read at %d: n=%d err=%v", off, n, err)
+			}
+			off += int64(n)
+		}
+		a.Close()
 	}
 }

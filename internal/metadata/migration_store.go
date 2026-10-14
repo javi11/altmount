@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/javi11/nzbparser"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
 // allSegmentLists returns every inline SegmentData slice a metadata carries:
@@ -54,7 +54,10 @@ func synthesizeStore(files []LegacyMeta, defaultGroup string) (*metapb.NzbStore,
 			return nil, nil, fmt.Errorf("expand shared outer sources for %s: %w", lm.VirtualPath, err)
 		}
 		entry := &metapb.NzbFileEntry{
-			Subject: filepath.Base(lm.VirtualPath),
+			// Unix filenames may contain arbitrary bytes, but protobuf strings
+			// require UTF-8. Replace invalid bytes only in this display subject;
+			// the original filesystem path and segment IDs must stay unchanged.
+			Subject: strings.ToValidUTF8(filepath.Base(lm.VirtualPath), "\ufffd"),
 			Date:    lm.Meta.CreatedAt,
 			Groups:  groups,
 		}

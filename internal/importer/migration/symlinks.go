@@ -17,18 +17,21 @@ type SymlinkLookup interface {
 
 // RewriteReport summarizes results of a symlink rewrite operation.
 type RewriteReport struct {
-	Scanned             int
-	Matched             int
-	Rewritten           int
-	SkippedWrongPrefix  int      // symlinks whose target didn't point at sourceMountPath/.ids/ — usually a misconfigured mount path
-	Unmatched           []string // symlink paths that had no matching migration row
-	Errors              []string // errors encountered (non-fatal)
+	Scanned            int
+	Matched            int // symlinks with a matching migration row and an existing target
+	Rewritten          int
+	SkippedWrongPrefix int      // symlinks whose target didn't point at sourceMountPath/.ids/ — usually a misconfigured mount path
+	Unmatched          []string // symlink paths that had no matching migration row
+	MissingTargets     []string // symlink paths and resolved targets that do not exist
+	Errors             []string // errors encountered (non-fatal)
 }
 
 // RewriteLibrarySymlinks walks libraryPath, finds symlinks (real OS symlinks or
 // rclone .rclonelink text files) whose target starts with sourceMountPath+"/.ids/",
 // looks up the GUID in the lookup, and rewrites the target to
 // filepath.Join(altmountPath, finalPath).
+// Targets are checked before counting matches or making changes; missing targets
+// leave the original link intact in both dry runs and applied migrations.
 //
 // If dryRun is true, no filesystem changes are made but the report is populated.
 func RewriteLibrarySymlinks(
@@ -41,8 +44,9 @@ func RewriteLibrarySymlinks(
 	dryRun bool,
 ) (*RewriteReport, error) {
 	report := &RewriteReport{
-		Unmatched: []string{},
-		Errors:    []string{},
+		Unmatched:      []string{},
+		MissingTargets: []string{},
+		Errors:         []string{},
 	}
 
 	// Normalise source mount prefix used for matching.
@@ -109,14 +113,22 @@ func RewriteLibrarySymlinks(
 			return nil
 		}
 
+		// Stat follows symlinks so dangling targets are rejected as well.
+		newTarget := filepath.Join(altmountPath, strings.TrimPrefix(finalPath, "/"))
+		if _, err := os.Stat(newTarget); err != nil {
+			if os.IsNotExist(err) {
+				report.MissingTargets = append(report.MissingTargets, fmt.Sprintf("%s -> %s", path, newTarget))
+			} else {
+				report.Errors = append(report.Errors, fmt.Sprintf("stat target for %s -> %s: %v", path, newTarget, err))
+			}
+			return nil
+		}
+
 		report.Matched++
 
 		if dryRun {
 			return nil
 		}
-
-		// Build the new target path.
-		newTarget := filepath.Join(altmountPath, strings.TrimPrefix(finalPath, "/"))
 
 		if isSymlink {
 			// Atomic rewrite via temp file + rename.

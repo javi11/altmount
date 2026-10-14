@@ -164,6 +164,7 @@ export interface NzbdavMigrateSymlinksResponse {
 	rewritten: number;
 	skipped_wrong_prefix?: number;
 	unmatched: string[];
+	missing_targets?: string[];
 	errors: string[];
 	dry_run: boolean;
 }

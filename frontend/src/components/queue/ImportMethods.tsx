@@ -1470,17 +1470,19 @@ function SymlinkMigrationForm({
 							{lastReport.dry_run ? "Dry Run Results" : "Migration Results"}
 						</span>
 					</div>
-					<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+					<div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
 						<div className="text-center">
 							<div className="font-bold font-mono text-lg">{lastReport.scanned}</div>
 							<div className="text-base-content/50 text-xs uppercase">Scanned</div>
 						</div>
 						<div className="text-center">
 							<div className="font-bold font-mono text-lg text-primary">{lastReport.matched}</div>
-							<div className="text-base-content/50 text-xs uppercase">Matched</div>
+							<div className="text-base-content/50 text-xs uppercase">Target Exists</div>
 						</div>
 						<div className="text-center">
-							<div className="font-bold font-mono text-lg text-success">{lastReport.rewritten}</div>
+							<div className="font-bold font-mono text-lg text-success">
+								{lastReport.dry_run ? lastReport.matched : lastReport.rewritten}
+							</div>
 							<div className="text-base-content/50 text-xs uppercase">
 								{lastReport.dry_run ? "Would Rewrite" : "Rewritten"}
 							</div>
@@ -1491,7 +1493,27 @@ function SymlinkMigrationForm({
 							</div>
 							<div className="text-base-content/50 text-xs uppercase">Unmatched</div>
 						</div>
+						<div className="text-center">
+							<div className="font-bold font-mono text-lg text-warning">
+								{(lastReport.missing_targets ?? []).length}
+							</div>
+							<div className="text-base-content/50 text-xs uppercase">Target Missing</div>
+						</div>
 					</div>
+					{(lastReport.missing_targets ?? []).length > 0 && (
+						<details className="mt-2">
+							<summary className="cursor-pointer text-warning text-xs">
+								{(lastReport.missing_targets ?? []).length} missing targets — links left unchanged
+							</summary>
+							<ul className="mt-2 max-h-32 overflow-y-auto font-mono text-xs">
+								{(lastReport.missing_targets ?? []).map((target) => (
+									<li key={target} className="break-all text-base-content/60">
+										{target}
+									</li>
+								))}
+							</ul>
+						</details>
+					)}
 					{(lastReport.unmatched ?? []).length > 0 && (
 						<details className="mt-2">
 							<summary className="cursor-pointer text-warning text-xs">

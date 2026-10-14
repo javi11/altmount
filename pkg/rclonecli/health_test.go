@@ -1,11 +1,16 @@
 package rclonecli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -139,7 +144,7 @@ func TestPerformMountHealthCheck_LeavesFailedMountMarkedMountedForRecovery(t *te
 	if !info.Mounted {
 		t.Fatal("failed mount must remain marked mounted until RecoverMount can unmount and reclaim its VFS")
 	}
-	if info.Error != "Health check failed" {
+	if !strings.Contains(info.Error, "health check failed") {
 		t.Fatalf("unexpected mount error: %q", info.Error)
 	}
 }
@@ -166,18 +171,21 @@ func TestRestartAfterProbeFailures_DerivesCountFromDuration(t *testing.T) {
 		want       int
 		why        string
 	}{
-		{"90s", 3, "the default, and the previous hard-coded behaviour"},
-		{"30s", 1, "exactly one interval"},
-		{"5m", 10, "a tolerant install riding out a long stall"},
-		{"45s", 2, "rounds up rather than truncating to one interval"},
-		{"1s", 1, "shorter than an interval still means one sustained failure"},
-		{"", 3, "unset falls back to the built-in default"},
-		{"nonsense", 3, "unparseable falls back rather than disabling the guard"},
-		{"-30s", 3, "negative falls back rather than restarting every tick"},
+		{"90s", 4, "three intervals elapse after the first failure"},
+		{"30.000000001s", 3, "just beyond an interval needs two complete intervals"},
+		{"29.999999999s", 2, "just below an interval waits one complete interval"},
+		{"0s", 4, "zero uses the 90-second default"},
+		{"30s", 2, "exactly one interval after the first failure"},
+		{"5m", 11, "a tolerant install riding out a long stall"},
+		{"45s", 3, "rounds up rather than truncating to one interval"},
+		{"1s", 2, "a positive tolerance requires another probe"},
+		{"", 4, "unset falls back to the built-in default"},
+		{"nonsense", 4, "unparseable falls back rather than disabling the guard"},
+		{"-30s", 4, "negative falls back rather than restarting every tick"},
 		// Near time.Duration's maximum. The obvious (x+interval-1)/interval form
 		// overflows here and collapses to 1, turning the longest tolerance
 		// expressible into a restart on every failed probe.
-		{"2562047h47m16.854775807s", 307445735, "an absurd but valid duration must not invert into no tolerance"},
+		{"2562047h47m16.854775807s", 307445736, "an absurd but valid duration must not invert into no tolerance"},
 	} {
 		m, _ := newHealthTestManager(t, false, time.Time{})
 		withRcdRestartAfter(t, m, tc.configured)
@@ -191,8 +199,8 @@ func TestRestartAfterProbeFailures_DerivesCountFromDuration(t *testing.T) {
 
 func TestRestartAfterProbeFailures_NoConfigUsesDefault(t *testing.T) {
 	m, _ := newHealthTestManager(t, false, time.Time{})
-	if got := m.restartAfterProbeFailures(); got != maxConsecutiveProbeFailures {
-		t.Errorf("with no config wired, threshold = %d, want %d", got, maxConsecutiveProbeFailures)
+	if got := m.restartAfterProbeFailures(); got != 4 {
+		t.Errorf("with no config wired, threshold = %d, want 4 for the 90s default", got)
 	}
 }
 
@@ -202,7 +210,7 @@ func TestRestartAfterProbeFailures_NoConfigUsesDefault(t *testing.T) {
 // every reader.
 func TestPerformMountHealthCheck_HonoursConfiguredTolerance(t *testing.T) {
 	m, restarts := newHealthTestManager(t, false, time.Now().Add(-time.Hour))
-	withRcdRestartAfter(t, m, "5m") // 10 probes
+	withRcdRestartAfter(t, m, "5m") // 11 probes
 
 	for range maxConsecutiveProbeFailures + 2 {
 		m.performMountHealthCheck()
@@ -211,10 +219,327 @@ func TestPerformMountHealthCheck_HonoursConfiguredTolerance(t *testing.T) {
 		t.Fatalf("restarted %d times past the default threshold; the configured tolerance was ignored", got)
 	}
 
-	for range 5 {
+	for range 11 - (maxConsecutiveProbeFailures + 2) {
 		m.performMountHealthCheck()
 	}
 	if got := atomic.LoadInt32(restarts); got != 1 {
 		t.Fatalf("restarts = %d after reaching the configured threshold, want 1", got)
+	}
+}
+
+// A regression to ceil(duration/interval) restarts at t=60s for a 90s
+// tolerance. Exercise the real HTTP probe and health-check decision together,
+// with each call representing a monitor tick; no wall-clock sleeps are needed.
+func TestPerformMountHealthCheck_RestartToleranceWithRCServer(t *testing.T) {
+	for _, configured := range []string{"90s", "", "invalid", "0s", "-1s"} {
+		t.Run(configured, func(t *testing.T) {
+			var healthy atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/core/version" {
+					t.Errorf("unexpected probe: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if !healthy.Load() {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"version":"v1.70.0"}`))
+			}))
+			defer server.Close()
+			u, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, restarts := newHealthTestManager(t, false, afterGrace())
+			withRcdRestartAfter(t, m, configured)
+			m.rcPort = u.Port()
+			m.httpClient = server.Client()
+			m.probe = m.pingServerWithTimeout
+
+			for _, elapsed := range []time.Duration{0, 30 * time.Second, 60 * time.Second} {
+				m.performMountHealthCheck()
+				if got := atomic.LoadInt32(restarts); got != 0 {
+					t.Fatalf("restart at %s before the 90s tolerance elapsed: %d", elapsed, got)
+				}
+			}
+			// One successful probe breaks the streak: subsequent failures must wait
+			// the whole tolerance, rather than retaining the previous failures.
+			healthy.Store(true)
+			m.performMountHealthCheck()
+			healthy.Store(false)
+			for _, elapsed := range []time.Duration{0, 30 * time.Second, 60 * time.Second, 90 * time.Second} {
+				m.performMountHealthCheck()
+				want := int32(0)
+				if elapsed == 90*time.Second {
+					want = 1
+				}
+				if got := atomic.LoadInt32(restarts); got != want {
+					t.Fatalf("after healthy reset, restarts at %s = %d, want %d", elapsed, got, want)
+				}
+			}
+			// A restart also breaks the streak; its next failure cannot restart again.
+			m.performMountHealthCheck()
+			if got := atomic.LoadInt32(restarts); got != 1 {
+				t.Fatalf("restart failed to reset the streak: %d restarts", got)
+			}
+		})
+	}
+}
+
+// Recovery uses the real RecoverMount path, stopping at the external force
+// unmount boundary so no FUSE mount or subprocess is needed.
+func newMountHealthTestManager(t *testing.T) (*Manager, map[string]bool, chan string) {
+	t.Helper()
+	m, _ := newHealthTestManager(t, true, afterGrace())
+	failures := map[string]bool{"altmount": true}
+	recoveries := make(chan string, 10)
+	m.mounts["altmount"] = &MountInfo{Provider: "altmount", LocalPath: "altmount", Mounted: true, desired: true}
+	m.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/operations/list" {
+			var args map[string]any
+			if err := json.NewDecoder(req.Body).Decode(&args); err != nil {
+				return nil, err
+			}
+			provider := strings.TrimSuffix(args["fs"].(string), ":")
+			if !failures[provider] {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			}
+			return nil, errors.New("WebDAV temporarily unavailable")
+		}
+		return nil, errors.New("stop RC unmount")
+	})}
+	m.forceUnmount = func(path string) error {
+		recoveries <- path
+		return errors.New("stop recovery before remount")
+	}
+	return m, failures, recoveries
+}
+
+func assertNoMountRecovery(t *testing.T, recoveries <-chan string) {
+	t.Helper()
+	select {
+	case provider := <-recoveries:
+		t.Fatalf("unexpected recovery of %s", provider)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func awaitMountRecovery(t *testing.T, m *Manager, recoveries <-chan string, want string) {
+	t.Helper()
+	select {
+	case got := <-recoveries:
+		if got != want {
+			t.Fatalf("recovered %s, want %s", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not run at threshold")
+	}
+	// Wait for RecoverMount to release its deduplication marker before the next
+	// health tick, ensuring a later duplicate recovery cannot be hidden by it.
+	deadline := time.Now().Add(time.Second)
+	for {
+		m.recoveryMu.Lock()
+		active := len(m.recovering)
+		m.recoveryMu.Unlock()
+		if active == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("recovery did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestPerformMountHealthCheck_SingleMountFailureDoesNotRecover(t *testing.T) {
+	m, _, recoveries := newMountHealthTestManager(t)
+	var logs bytes.Buffer
+	m.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	m.performMountHealthCheck()
+	assertNoMountRecovery(t, recoveries)
+	if !strings.Contains(logs.String(), "err=") || !strings.Contains(logs.String(), "WebDAV temporarily unavailable") {
+		t.Fatalf("health warning lost underlying failure: %s", logs.String())
+	}
+	info, _ := m.GetMountInfo("altmount")
+	if !strings.Contains(info.Error, "WebDAV temporarily unavailable") {
+		t.Fatalf("mount error lost underlying failure: %q", info.Error)
+	}
+}
+
+func TestPerformMountHealthCheck_MountThresholdRecoversOnce(t *testing.T) {
+	m, _, recoveries := newMountHealthTestManager(t)
+	withRcdRestartAfter(t, m, "2m") // Five probes, using existing rcd tolerance.
+	for range 4 {
+		m.performMountHealthCheck()
+	}
+	assertNoMountRecovery(t, recoveries)
+	m.performMountHealthCheck()
+	awaitMountRecovery(t, m, recoveries, "altmount")
+	m.performMountHealthCheck()
+	assertNoMountRecovery(t, recoveries)
+}
+
+func TestPerformMountHealthCheck_MountSuccessResetsStreak(t *testing.T) {
+	m, failures, recoveries := newMountHealthTestManager(t)
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	failures["altmount"] = false
+	m.performMountHealthCheck()
+	info, _ := m.GetMountInfo("altmount")
+	if info.Error != "" {
+		t.Fatalf("healthy mount retains error: %q", info.Error)
+	}
+	failures["altmount"] = true
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	assertNoMountRecovery(t, recoveries)
+	m.performMountHealthCheck()
+	awaitMountRecovery(t, m, recoveries, "altmount")
+}
+
+func TestPerformMountHealthCheck_MountStreaksAreIndependent(t *testing.T) {
+	m, failures, recoveries := newMountHealthTestManager(t)
+	m.mounts["other"] = &MountInfo{Provider: "other", LocalPath: "other", Mounted: true, desired: true}
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	failures["other"] = true
+	m.performMountHealthCheck()
+	awaitMountRecovery(t, m, recoveries, "altmount")
+	m.performMountHealthCheck()
+	assertNoMountRecovery(t, recoveries)
+	m.performMountHealthCheck()
+	assertNoMountRecovery(t, recoveries)
+	m.performMountHealthCheck()
+	awaitMountRecovery(t, m, recoveries, "other")
+}
+
+func TestPerformMountHealthCheck_NewMountStartsFreshStreak(t *testing.T) {
+	m, _, recoveries := newMountHealthTestManager(t)
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	m.mountsMutex.Lock()
+	m.mounts["altmount"] = &MountInfo{Provider: "altmount", LocalPath: "altmount", Mounted: true, desired: true}
+	m.mountsMutex.Unlock()
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	assertNoMountRecovery(t, recoveries)
+	m.performMountHealthCheck()
+	awaitMountRecovery(t, m, recoveries, "altmount")
+}
+
+func TestCheckMountHealth_ReturnsUnderlyingError(t *testing.T) {
+	m, _ := newHealthTestManager(t, true, afterGrace())
+	failure := errors.New("WebDAV timeout")
+	m.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, failure
+	})}
+	if err := m.checkMountHealth("altmount"); !errors.Is(err, failure) {
+		t.Fatalf("health check error = %v, want underlying timeout", err)
+	}
+}
+
+func TestPerformMountHealthCheck_IgnoresResultForReplacedMount(t *testing.T) {
+	m, _, recoveries := newMountHealthTestManager(t)
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	transport := m.httpClient.Transport
+	m.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		// Simulate replacement while operations/list is in flight.
+		m.mountsMutex.Lock()
+		m.mounts["altmount"] = &MountInfo{Provider: "altmount", LocalPath: "altmount", Mounted: true, desired: true}
+		m.mountsMutex.Unlock()
+		return transport.RoundTrip(req)
+	})
+	m.performMountHealthCheck()
+	m.httpClient.Transport = transport
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	assertNoMountRecovery(t, recoveries)
+	m.performMountHealthCheck()
+	awaitMountRecovery(t, m, recoveries, "altmount")
+}
+
+func TestPerformMountHealthCheck_UnmountResetsStreak(t *testing.T) {
+	m, _, recoveries := newMountHealthTestManager(t)
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	m.forceUnmount = func(string) error { return nil }
+	if err := m.Unmount(context.Background(), "altmount"); err != nil {
+		t.Fatal(err)
+	}
+	m.mountsMutex.Lock()
+	m.mounts["altmount"].Mounted = true
+	m.mounts["altmount"].desired = true
+	m.mountsMutex.Unlock()
+	m.forceUnmount = func(path string) error {
+		recoveries <- path
+		return errors.New("stop recovery before remount")
+	}
+	for range 3 {
+		m.performMountHealthCheck()
+	}
+	assertNoMountRecovery(t, recoveries)
+	m.performMountHealthCheck()
+	awaitMountRecovery(t, m, recoveries, "altmount")
+}
+
+func TestPerformMountHealthCheck_QueuedRecoveryIgnoresLifecycleChange(t *testing.T) {
+	for _, action := range []string{"replace", "unmount"} {
+		t.Run(action, func(t *testing.T) {
+			m, _, recoveries := newMountHealthTestManager(t)
+			for range 3 {
+				m.performMountHealthCheck()
+			}
+			m.mountMu.Lock()
+			m.performMountHealthCheck()
+			deadline := time.Now().Add(time.Second)
+			for {
+				m.recoveryMu.Lock()
+				_, queued := m.recovering["altmount"]
+				m.recoveryMu.Unlock()
+				if queued {
+					break
+				}
+				if time.Now().After(deadline) {
+					m.mountMu.Unlock()
+					t.Fatal("recovery was not queued")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			m.mountsMutex.Lock()
+			if action == "replace" {
+				m.mounts["altmount"] = &MountInfo{Provider: "altmount", LocalPath: "replacement", Mounted: true, desired: true}
+			} else {
+				m.mounts["altmount"].Mounted = false
+				m.mounts["altmount"].desired = false
+			}
+			m.mountsMutex.Unlock()
+			m.mountMu.Unlock()
+			assertNoMountRecovery(t, recoveries)
+			// Ensure the queued recovery exited rather than merely failing to start.
+			deadline = time.Now().Add(time.Second)
+			for {
+				m.recoveryMu.Lock()
+				active := len(m.recovering)
+				m.recoveryMu.Unlock()
+				if active == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("stale recovery did not exit")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
 	}
 }
