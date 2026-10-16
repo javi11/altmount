@@ -606,6 +606,8 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Build a reverse map: mount relative path -> library path for quick lookup
 	filesInUse := make(map[string]string)
+	// Keep association preference separate from the existing cleanup selection.
+	libraryPaths := make(map[string]string)
 	// Track which files are actually in the official library (to protect them from deletion)
 	filesInLibrary := make(map[string]bool)
 
@@ -618,6 +620,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			filesInUse[rel] = libPath
 			if isLibrary {
 				filesInLibrary[rel] = true
+				libraryPaths[rel] = libPath
 			}
 		}
 	}
@@ -709,7 +712,10 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			}
 
 			// Look up library path from our map (found via symlinks/strm scanning)
-			libraryPath := lsw.getLibraryPath(path, filesInUse)
+			libraryPath := lsw.getLibraryPath(path, libraryPaths)
+			if libraryPath == nil {
+				libraryPath = lsw.getLibraryPath(path, filesInUse)
+			}
 
 			// Path Recovery: If record exists but the physical path is broken,
 			// try to see if it's at the expected location even if not in filesInUse
