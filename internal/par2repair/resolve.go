@@ -557,6 +557,9 @@ func matchSetFiles(
 	used := make([]bool, len(store.Files))
 	var out []SetFile
 	var matched []matchedFile
+	// Built on the first member whose name is not in any subject (obfuscated
+	// posts): every NZB file's head is fetched once, not once per member.
+	var heads *headIndex
 
 	for _, id := range idx.RecoveryIDs {
 		fd := idx.Files[id]
@@ -570,22 +573,13 @@ func matchSetFiles(
 		}
 		// Pass 2: Hash16k of the entry's first bytes.
 		if entry < 0 {
-			for i, f := range store.Files {
-				if used[i] || len(f.Segments) == 0 || dead[normalizeMsgID(f.Segments[0].Id)] {
-					continue
-				}
-				prefix, err := filePrefix(ctx, fetch, f, cache)
-				if err != nil {
-					continue // dead or unreadable head article: cannot match by content
-				}
-				if bytes.HasPrefix(prefix, []byte("PAR2\x00PKT")) {
-					continue // a PAR2 file, never a recovery-set member
-				}
-				if hash16k(prefix, int64(fd.Length)) == fd.Hash16k {
-					entry = i
-					break
+			if heads == nil {
+				heads = buildHeadIndex(ctx, fetch, store, dead, cache)
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
 				}
 			}
+			entry = heads.match(fd, used)
 		}
 		if entry < 0 {
 			return nil, fmt.Errorf("%w: recovery-set member %q not found in NZB", ErrUnrepairable, fd.Name)
@@ -599,7 +593,8 @@ func matchSetFiles(
 	// sequence. The warm pool bounds the fan-out on huge releases.
 	for _, m := range matched {
 		if len(m.entry.Segments) > 0 {
-			if id := normalizeMsgID(m.entry.Segments[0].Id); !dead[id] {
+			id := normalizeMsgID(m.entry.Segments[0].Id)
+			if _, known := heads.headSizes()[id]; !dead[id] && !known {
 				cache.warm(ctx, fetch, id)
 			}
 		}
@@ -611,7 +606,7 @@ func matchSetFiles(
 	var releasePartSize int64
 	var deferred []int
 	for i, m := range matched {
-		sf, partSize, err := sizeArticles(ctx, idx, m.id, m.entry, dead, fetch, cache, 0)
+		sf, partSize, err := sizeArticles(ctx, idx, m.id, m.entry, dead, fetch, cache, 0, heads.headSizes())
 		if errors.Is(err, errNoLiveArticle) {
 			deferred = append(deferred, i)
 			continue
@@ -640,7 +635,7 @@ func matchSetFiles(
 			return nil, fmt.Errorf("%w: no live article anywhere in the release to derive the part size (every article of %q and its siblings is missing)",
 				ErrUnrepairable, fd.Name)
 		}
-		sf, _, err := sizeArticles(ctx, idx, matched[i].id, matched[i].entry, dead, fetch, cache, releasePartSize)
+		sf, _, err := sizeArticles(ctx, idx, matched[i].id, matched[i].entry, dead, fetch, cache, releasePartSize, heads.headSizes())
 		if err != nil {
 			return nil, err
 		}
@@ -677,6 +672,7 @@ func sizeArticles(
 	fetch ArticleFetcher,
 	cache *articleCache,
 	hint int64,
+	known map[string]int64,
 ) (SetFile, int64, error) {
 	fd := idx.Files[fileID]
 	n := len(entry.Segments)
@@ -695,6 +691,10 @@ func sizeArticles(
 			msgID := normalizeMsgID(seg.Id)
 			if dead[msgID] {
 				continue
+			}
+			if size, ok := known[msgID]; ok {
+				partSize = size
+				break
 			}
 			payload, err := fetchCached(ctx, fetch, msgID, cache)
 			if err != nil {
@@ -744,16 +744,103 @@ func sizeArticles(
 	return sf, derived, nil
 }
 
-// filePrefix returns the first up-to-16KiB of a store file's content.
-func filePrefix(ctx context.Context, fetch ArticleFetcher, entry *metapb.NzbFileEntry, cache *articleCache) ([]byte, error) {
-	payload, err := fetchCached(ctx, fetch, normalizeMsgID(entry.Segments[0].Id), cache)
-	if err != nil {
-		return nil, err
+// headFetchWorkers bounds the parallel head fetches when matching an
+// obfuscated release by content.
+const headFetchWorkers = 16
+
+// headIndex is every NZB file's head (first 16 KiB, and the decoded size of
+// its first article), fetched once. Matching an obfuscated release used to
+// fetch each candidate's head again for every recovery-set member: quadratic
+// in the file count, and the bounded article cache could not absorb it, so a
+// few-hundred-volume release sat in planning for hours.
+type headIndex struct {
+	prefixes [][]byte // per store file; nil when unusable (dead, unreadable, PAR2)
+	byHash   map[[16]byte][]int
+	sizes    map[string]int64 // head article ID -> decoded size
+}
+
+func buildHeadIndex(ctx context.Context, fetch ArticleFetcher, store *metapb.NzbStore, dead map[string]bool, cache *articleCache) *headIndex {
+	h := &headIndex{
+		prefixes: make([][]byte, len(store.Files)),
+		byHash:   map[[16]byte][]int{},
+		sizes:    map[string]int64{},
 	}
-	if len(payload) > 16384 {
-		return payload[:16384], nil
+	sizes := make([]int64, len(store.Files))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(headFetchWorkers, len(store.Files)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				f := store.Files[i]
+				payload, err := fetchCached(ctx, fetch, normalizeMsgID(f.Segments[0].Id), cache)
+				if err != nil {
+					continue // dead or unreadable head article: cannot match by content
+				}
+				if bytes.HasPrefix(payload, []byte("PAR2\x00PKT")) {
+					continue // a PAR2 file, never a recovery-set member
+				}
+				// Copy: the payload is a whole article and must not stay pinned.
+				h.prefixes[i] = bytes.Clone(payload[:min(len(payload), 16384)])
+				sizes[i] = int64(len(payload))
+			}
+		}()
 	}
-	return payload, nil
+feed:
+	for i, f := range store.Files {
+		if len(f.Segments) == 0 || dead[normalizeMsgID(f.Segments[0].Id)] {
+			continue
+		}
+		select {
+		case jobs <- i:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	for i, prefix := range h.prefixes {
+		if prefix == nil {
+			continue
+		}
+		h.sizes[normalizeMsgID(store.Files[i].Segments[0].Id)] = sizes[i]
+		if len(prefix) >= 16384 {
+			sum := md5.Sum(prefix)
+			h.byHash[sum] = append(h.byHash[sum], i)
+		}
+	}
+	return h
+}
+
+// match returns the first unused store file whose content hashes to the
+// member's Hash16k, or -1.
+func (h *headIndex) match(fd par2.FileDescriptor, used []bool) int {
+	if fd.Length >= 16384 {
+		for _, i := range h.byHash[fd.Hash16k] {
+			if !used[i] {
+				return i
+			}
+		}
+		return -1
+	}
+	// Short files hash zero-padded to their own length: no shared key.
+	for i, prefix := range h.prefixes {
+		if prefix != nil && !used[i] && hash16k(prefix, int64(fd.Length)) == fd.Hash16k {
+			return i
+		}
+	}
+	return -1
+}
+
+// headSizes is the decoded size of every head article fetched, so sizing can
+// skip refetching them. Nil-safe.
+func (h *headIndex) headSizes() map[string]int64 {
+	if h == nil {
+		return nil
+	}
+	return h.sizes
 }
 
 // hash16k computes the PAR2 Hash16k: MD5 of the first 16KiB of the file,
