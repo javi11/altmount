@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kipsilabs/altmount/internal/holes"
 	"github.com/kipsilabs/altmount/internal/importer/multifile"
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
@@ -463,6 +464,71 @@ func TestImportBattery_RarWidthMismatchVolumeNaming(t *testing.T) {
 			continue
 		}
 		for _, s := range meta.SegmentData {
+			covered += s.EndOffset - s.StartOffset + 1
+		}
+	}
+	if covered < want {
+		t.Errorf("segment coverage %d < file size %d — not all volumes mapped", covered, want)
+	}
+}
+
+// TestImportBattery_ObfuscatedRandomisedSegmentTotals imports a multi-volume
+// RAR posted the way obfuscating uploaders do it: every volume lists all of
+// its segments, but each subject declares a different, larger "(1/N)" total.
+// The totals are noise; trusting them synthesised tail placeholders for nearly
+// every volume, so a complete release was treated as missing articles (and,
+// with repair-on-import enabled, parked for a PAR2 repair it never needed).
+// The import must succeed with every volume mapped and no placeholder
+// segments.
+func TestImportBattery_ObfuscatedRandomisedSegmentTotals(t *testing.T) {
+	entries := loadManifest(t, "rar_widthmismatch")
+	env := newBatteryEnv(t)
+
+	matches, err := filepath.Glob(filepath.Join("testdata", "rar_widthmismatch", "archive.part*.rar"))
+	if err != nil {
+		t.Fatalf("glob fixtures: %v", err)
+	}
+	volNum := func(p string) int {
+		b := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "archive.part"), ".rar")
+		n, _ := strconv.Atoi(b)
+		return n
+	}
+	sort.Slice(matches, func(i, j int) bool { return volNum(matches[i]) < volNum(matches[j]) })
+
+	// 15360-byte volumes split at 5120 bytes: every full volume is exactly
+	// three segments, so they all end at segment 3 while their subjects
+	// claim totals of 4 to 7.
+	const partSize = 5120
+	var files []nzbbuild.File
+	for i, m := range matches {
+		name := filepath.Base(m)
+		data := loadFixture(t, filepath.Join("rar_widthmismatch", name))
+		segs := env.registerContent(fmt.Sprintf("rar-obf-%03d", volNum(m)), data, partSize, 1.0, nil)
+		fakeTotal := len(segs) + 1 + i%4
+		subject := fmt.Sprintf(`obf%02dXq [%d/%d] - "%s" yEnc (1/%d)`, i, i+1, len(matches), name, fakeTotal)
+		files = append(files, nzbbuild.File{Subject: subject, Segments: segs})
+	}
+
+	result, _, err := env.runImport(nzbbuild.Build(files...), "archive")
+	if err != nil {
+		t.Fatalf("import failed: complete release with randomised subject totals treated as damaged: %v", err)
+	}
+	if result != "/archive" {
+		t.Errorf("result = %q, want /archive", result)
+	}
+	assertInnerFile(t, env, "/archive", entries)
+
+	want := int64(entries[0].Size)
+	var covered int64
+	for _, name := range env.listDir("/archive") {
+		meta := env.readMeta("/archive/" + name)
+		if meta.FileSize != want {
+			continue
+		}
+		for _, s := range meta.SegmentData {
+			if holes.IsPlaceholderID(s.Id) {
+				t.Fatalf("segment %q is a gap placeholder conjured from a randomised subject total", s.Id)
+			}
 			covered += s.EndOffset - s.StartOffset + 1
 		}
 	}
