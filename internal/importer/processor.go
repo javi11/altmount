@@ -383,6 +383,40 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 	}
 }
 
+// probeMissesOnlySidecars reports whether every article the release probe
+// found missing belongs to a sidecar file (.nfo, .sfv, images, ...).
+func probeMissesOnlySidecars(files []validation.FastFailFile, missingIDs []string) bool {
+	if len(missingIDs) == 0 {
+		return false
+	}
+	missing := make(map[string]struct{}, len(missingIDs))
+	for _, id := range missingIDs {
+		missing[id] = struct{}{}
+	}
+	for _, f := range files {
+		if isSidecarFile(f.Filename) {
+			continue
+		}
+		for _, seg := range f.Segments {
+			if seg == nil {
+				continue
+			}
+			if _, gone := missing[seg.Id]; gone {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isSidecarFile(filename string) bool {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".nfo", ".sfv", ".txt", ".srr", ".jpg", ".jpeg", ".png", ".nzb", ".md5":
+		return true
+	}
+	return false
+}
+
 // preParseFastFail runs a per-file Stat-based reachability check against the raw NZB
 // before any Body fetches. PAR2 files and sidecars are never Stat-checked (they're
 // included regardless), so their segments are omitted from the sweep to avoid wasted
@@ -490,7 +524,10 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		}
 	default:
 		isStremioImport := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
-		if isStremioImport && cfg.Stremio.EffectiveFastFailHeaderOnly() {
+		// A miss confined to sidecars (a separately posted .nfo often expires
+		// on its own) says nothing about the media: escalate so the sweep
+		// drops just those files instead of failing the whole release.
+		if isStremioImport && cfg.Stremio.EffectiveFastFailHeaderOnly() && !probeMissesOnlySidecars(fastFailFiles, verdict.MissingIDs) {
 			if proc.log != nil {
 				proc.log.InfoContext(ctx, "Fast-fail release probe failed for Stremio import; aborting immediately without per-file sweep",
 					"files", len(fastFailFiles),
