@@ -753,3 +753,71 @@ func TestNewsnabClient_DownloadNZB_Redirect(t *testing.T) {
 		assert.Contains(t, err.Error(), "private address")
 	})
 }
+
+// fakeStrictIndexer answers like a strict Newznab indexer: any request carrying
+// o=json is rejected with HTTP 400 and Newznab error 201; without it, a
+// standard RSS result.
+func fakeStrictIndexer(t *testing.T, withO *int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCaps(w, r) {
+			return
+		}
+		if r.URL.Query().Has("o") {
+			atomic.AddInt32(withO, 1)
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<error code="201" description="Unsupported parameter (o)"/>`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/"><channel>
+<item><title>The.Fugitive.1993.1080p.BluRay.x264</title>
+<enclosure url="https://indexer.test/getnzb/1.nzb" length="9000000000" type="application/x-nzb" />
+<newznab:attr name="category" value="2040" /><newznab:attr name="size" value="9000000000" /></item>
+</channel></rss>`))
+	}))
+}
+
+// A strict indexer rejects the optional o=json with HTTP 400. The search must
+// drop it, retry, parse the XML result, and not send it to that indexer again.
+func TestNewsnabClient_DropsUnsupportedOptionalParam(t *testing.T) {
+	var withO int32
+	ts := fakeStrictIndexer(t, &withO)
+	defer ts.Close()
+
+	client := NewClient(IndexerConfig{ID: "strict", Name: "Strict", URL: ts.URL, APIKey: "k", TimeoutSeconds: 2, Enabled: true}, ts.Client())
+	for range 2 {
+		results, err := client.SearchMovie(context.Background(), "", "The Fugitive 1993", nil, "AltMount/1.0")
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, "The.Fugitive.1993.1080p.BluRay.x264", results[0].Title)
+	}
+	assert.EqualValues(t, 1, atomic.LoadInt32(&withO), "o=json rejected once, then never sent again")
+}
+
+// A rejection that names no droppable parameter (a bad API key) is not
+// retried, and the indexer's own explanation reaches the error instead of a
+// bare status code.
+func TestNewsnabClient_SurfacesErrorDescriptionOnNon200(t *testing.T) {
+	var calls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCaps(w, r) {
+			return
+		}
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<error code="100" description="Incorrect user credentials"/>`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(IndexerConfig{ID: "x", Name: "Strict", URL: ts.URL, APIKey: "bad", TimeoutSeconds: 2, Enabled: true}, ts.Client())
+	_, err := client.SearchMovie(context.Background(), "", "Anything", nil, "AltMount/1.0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 400")
+	assert.Contains(t, err.Error(), "Incorrect user credentials")
+	assert.EqualValues(t, 1, atomic.LoadInt32(&calls), "credential errors are not retried")
+}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,6 +95,70 @@ type Client struct {
 	idMu             sync.Mutex
 	idSearchFailures map[string]time.Time
 	idSearchMisses   map[string]time.Time
+
+	// unsupportedMu guards unsupportedParams: optional search parameters this
+	// indexer rejected ("Unsupported parameter (o)"), which are no longer
+	// sent to it.
+	unsupportedMu     sync.Mutex
+	unsupportedParams map[string]bool
+}
+
+// optionalSearchParams are extras every search asks for but no indexer is
+// required to accept. Strict indexers reject an unknown one with
+// error 201 "Unsupported parameter (o)" and HTTP 400; such a parameter is
+// dropped for that indexer and the search retried. Results parse from either
+// JSON or the standard Newznab RSS, so dropping o=json loses nothing.
+var optionalSearchParams = []struct{ name, value string }{
+	{"o", "json"},
+	{"extended", "1"},
+	{"limit", "100"},
+}
+
+// unsupportedParamPattern pulls the parameter name out of a Newznab
+// "Unsupported parameter (o)" / "Incorrect parameter (o)" description.
+var unsupportedParamPattern = regexp.MustCompile(`(?i)(?:unsupported|incorrect|invalid) parameter\s*\(([a-z0-9_]+)\)`)
+
+// paramUnsupported reports whether this indexer rejected the parameter.
+func (c *Client) paramUnsupported(name string) bool {
+	c.unsupportedMu.Lock()
+	defer c.unsupportedMu.Unlock()
+	return c.unsupportedParams[name]
+}
+
+// learnUnsupportedParam records an optional parameter the indexer rejected.
+// It reports false when apiErr names nothing droppable (or nothing new), so
+// the caller surfaces the error instead of retrying.
+func (c *Client) learnUnsupportedParam(ctx context.Context, apiErr *Error) bool {
+	if apiErr == nil {
+		return false
+	}
+	m := unsupportedParamPattern.FindStringSubmatch(apiErr.Description)
+	if m == nil {
+		return false
+	}
+	name := strings.ToLower(m[1])
+	optional := false
+	for _, p := range optionalSearchParams {
+		if p.name == name {
+			optional = true
+			break
+		}
+	}
+	if !optional {
+		return false
+	}
+	c.unsupportedMu.Lock()
+	defer c.unsupportedMu.Unlock()
+	if c.unsupportedParams[name] {
+		return false
+	}
+	if c.unsupportedParams == nil {
+		c.unsupportedParams = map[string]bool{}
+	}
+	c.unsupportedParams[name] = true
+	slog.InfoContext(ctx, "Newsnab indexer rejects an optional parameter; no longer sending it",
+		"indexer", c.config.Name, "param", name, "reason", apiErr.Description)
+	return true
 }
 
 // Parameters usable as negative-cache keys for identifier searches.
@@ -574,6 +640,15 @@ func detectAPIError(body []byte) error {
 	return nil
 }
 
+// asAPIError recovers the structured Newznab error, or nil.
+func asAPIError(err error) *Error {
+	var apiErr *Error
+	if errors.As(err, &apiErr) {
+		return apiErr
+	}
+	return nil
+}
+
 // queryFallback picks the keyword used when an identifier parameter cannot be
 // sent: the resolved title when known, otherwise the raw identifier.
 func queryFallback(imdbID, title string) string {
@@ -617,17 +692,37 @@ func stampByID(results []Result, byID bool) []Result {
 }
 
 func (c *Client) executeSearch(ctx context.Context, params url.Values, userAgent string, byID bool) ([]Result, error) {
+	// One retry per optional parameter an indexer might reject.
+	for attempt := 0; ; attempt++ {
+		results, apiErr, err := c.searchOnce(ctx, params, userAgent, byID)
+		if apiErr != nil && attempt < len(optionalSearchParams) && c.learnUnsupportedParam(ctx, apiErr) {
+			continue
+		}
+		return results, err
+	}
+}
+
+// searchOnce performs one search request. apiErr is the indexer's structured
+// Newznab error when it sent one (with or without a 2xx status), so the
+// caller can drop a rejected optional parameter and retry.
+func (c *Client) searchOnce(ctx context.Context, base url.Values, userAgent string, byID bool) ([]Result, *Error, error) {
+	params := make(url.Values, len(base)+4)
+	for k, v := range base {
+		params[k] = v
+	}
 	params.Set("apikey", c.config.APIKey)
-	params.Set("o", "json")
-	params.Set("extended", "1")
-	params.Set("limit", "100")
+	for _, p := range optionalSearchParams {
+		if !c.paramUnsupported(p.name) {
+			params.Set(p.name, p.value)
+		}
+	}
 
 	baseURL := strings.TrimRight(c.config.URL, "/")
 	reqURL := fmt.Sprintf("%s/api?%s", baseURL, params.Encode())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("newsnab: create request failed: %w", err)
+		return nil, nil, fmt.Errorf("newsnab: create request failed: %w", err)
 	}
 	if userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)
@@ -635,39 +730,44 @@ func (c *Client) executeSearch(ctx context.Context, params url.Values, userAgent
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("newsnab: search request failed (%s): %w", c.config.Name, httpclient.RedactURLError(err))
+		return nil, nil, fmt.Errorf("newsnab: search request failed (%s): %w", c.config.Name, httpclient.RedactURLError(err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("newsnab: search returned HTTP %d (%s)", resp.StatusCode, c.config.Name)
+		// Newznab indexers explain a rejection in the body; keep it.
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		if apiErr := asAPIError(detectAPIError(errBody)); apiErr != nil {
+			return nil, apiErr, fmt.Errorf("newsnab: search returned HTTP %d (%s): %w", resp.StatusCode, c.config.Name, apiErr)
+		}
+		return nil, nil, fmt.Errorf("newsnab: search returned HTTP %d (%s)", resp.StatusCode, c.config.Name)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("newsnab: read body failed: %w", err)
+		return nil, nil, fmt.Errorf("newsnab: read body failed: %w", err)
 	}
 
 	// Surface structured Newznab errors instead of silently returning zero results.
-	if apiErr := detectAPIError(body); apiErr != nil {
+	if err := detectAPIError(body); err != nil {
 		slog.WarnContext(ctx, "Newsnab indexer returned API error",
-			"indexer", c.config.Name, "error", apiErr)
-		return nil, apiErr
+			"indexer", c.config.Name, "error", err)
+		return nil, asAPIError(err), err
 	}
 
 	// First try parsing JSON
 	results, err := c.parseJSONResults(body)
 	if err == nil && len(results) > 0 {
-		return stampByID(results, byID), nil
+		return stampByID(results, byID), nil, nil
 	}
 
 	// Fallback to XML RSS parsing if indexer ignored o=json
 	xmlResults, xmlErr := c.parseXMLResults(body)
 	if xmlErr == nil {
-		return stampByID(xmlResults, byID), nil
+		return stampByID(xmlResults, byID), nil, nil
 	}
 
-	return stampByID(results, byID), nil
+	return stampByID(results, byID), nil, nil
 }
 
 func (c *Client) parseJSONResults(body []byte) ([]Result, error) {
