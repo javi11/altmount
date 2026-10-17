@@ -10,11 +10,66 @@ import {
 	XCircle,
 	Zap,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiClient } from "../../../api/client";
-import type { ScoredReleaseItem, StreamScoringConfig } from "../../../types/config";
+import type {
+	EvaluateReleaseResponse,
+	ScoredReleaseItem,
+	StreamScoringConfig,
+} from "../../../types/config";
 import { LoadingSpinner } from "../../ui/LoadingSpinner";
-import { evaluateRelease } from "./scoringPresets";
+
+type Verdict = "top_pick" | "standard" | "low_score" | "discarded";
+
+interface ReleaseEvaluation {
+	totalScore: number;
+	matches: { format: { id: string; name: string }; score: number }[];
+	excluded: boolean;
+	excludeReason?: string;
+	matchedLanguages: string[];
+	languageBonus: number;
+	verdict: Verdict;
+	verdictLabel: string;
+}
+
+const AWAITING_EVALUATION: ReleaseEvaluation = {
+	totalScore: 0,
+	matches: [],
+	excluded: false,
+	matchedLanguages: [],
+	languageBonus: 0,
+	verdict: "standard",
+	verdictLabel: "Awaiting Input",
+};
+
+/** Maps the final excluded/score state to a user-facing verdict and label. */
+function computeVerdict(
+	excluded: boolean,
+	totalScore: number,
+): Pick<ReleaseEvaluation, "verdict" | "verdictLabel"> {
+	if (excluded) {
+		return { verdict: "discarded", verdictLabel: "🚫 Discarded / Blacklisted" };
+	}
+	if (totalScore >= 800) {
+		return { verdict: "top_pick", verdictLabel: "✅ High Priority (Top Stream Pick)" };
+	}
+	if (totalScore < 0) {
+		return { verdict: "low_score", verdictLabel: "⚠️ Low Score (Demoted)" };
+	}
+	return { verdict: "standard", verdictLabel: "⚡ Standard Priority" };
+}
+
+function toEvaluation(res: EvaluateReleaseResponse): ReleaseEvaluation {
+	return {
+		totalScore: res.score,
+		matches: res.formats.map((f) => ({ format: { id: f.id, name: f.name }, score: f.score })),
+		excluded: res.excluded,
+		excludeReason: res.exclude_reason,
+		matchedLanguages: res.matched_languages,
+		languageBonus: res.language_bonus,
+		...computeVerdict(res.excluded, res.score),
+	};
+}
 
 interface ReleaseScoreSandboxProps {
 	scoringConfig: StreamScoringConfig;
@@ -94,8 +149,32 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 	// when a newer search has already been issued.
 	const searchSeqRef = useRef(0);
 
-	const evaluation = useMemo(() => {
-		return evaluateRelease(testTitle, scoringConfig);
+	// Single titles are scored by the backend, with the same scorer that ranks
+	// Stremio streams, so this view can never drift from the real order.
+	const [evaluation, setEvaluation] = useState<ReleaseEvaluation>(AWAITING_EVALUATION);
+	const [evaluationError, setEvaluationError] = useState<string | null>(null);
+	const evaluationSeqRef = useRef(0);
+
+	useEffect(() => {
+		const title = testTitle.trim();
+		const seq = ++evaluationSeqRef.current;
+		if (!title) {
+			setEvaluation(AWAITING_EVALUATION);
+			setEvaluationError(null);
+			return;
+		}
+		const timer = setTimeout(async () => {
+			try {
+				const res = await apiClient.evaluateStremioRelease({ title, scoring: scoringConfig });
+				if (seq !== evaluationSeqRef.current) return;
+				setEvaluation(toEvaluation(res));
+				setEvaluationError(null);
+			} catch (err) {
+				if (seq !== evaluationSeqRef.current) return;
+				setEvaluationError(err instanceof Error ? err.message : "Failed to score release");
+			}
+		}, 250);
+		return () => clearTimeout(timer);
 	}, [testTitle, scoringConfig]);
 
 	const handleExecuteSearch = async () => {
@@ -487,6 +566,11 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 																{lang}
 															</span>
 														))}
+														{(release.language_bonus ?? 0) > 0 && (
+															<span className="badge badge-info badge-outline badge-xs font-mono text-[10px]">
+																+{release.language_bonus} language
+															</span>
+														)}
 													</div>
 
 													{/* Discard Error Box */}
@@ -624,7 +708,19 @@ export function ReleaseScoreSandbox({ scoringConfig }: ReleaseScoreSandboxProps)
 											{lang}
 										</span>
 									))}
+									{evaluation.languageBonus > 0 && (
+										<span className="badge badge-success badge-sm whitespace-nowrap font-mono font-semibold">
+											+{evaluation.languageBonus} pts preferred language
+										</span>
+									)}
 								</div>
+							</div>
+						)}
+
+						{evaluationError && (
+							<div className="alert alert-warning py-2 text-xs">
+								<AlertTriangle className="h-4 w-4 shrink-0" />
+								<div>{evaluationError}</div>
 							</div>
 						)}
 

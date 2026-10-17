@@ -262,6 +262,70 @@ func (s *Server) collectLibraryEpisodes(
 	}
 }
 
+// EvaluateReleaseRequest is the body of POST /api/stremio/scoring/evaluate.
+type EvaluateReleaseRequest struct {
+	Title   string                       `json:"title"`
+	Scoring *stremio.StreamScoringConfig `json:"scoring,omitempty"`
+}
+
+// EvaluatedFormat is a custom format that matched, with the score it added.
+type EvaluatedFormat struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Score int    `json:"score"`
+}
+
+// EvaluateReleaseResponse is how the stream ranking scores one release title.
+type EvaluateReleaseResponse struct {
+	Score            int               `json:"score"`
+	Excluded         bool              `json:"excluded"`
+	ExcludeReason    string            `json:"exclude_reason,omitempty"`
+	MatchedLanguages []string          `json:"matched_languages"`
+	LanguageBonus    int               `json:"language_bonus"`
+	Formats          []EvaluatedFormat `json:"formats"`
+}
+
+// handleEvaluateStremioRelease handles POST /api/stremio/scoring/evaluate:
+// scores one release title with the same scorer that ranks Stremio streams,
+// against the stored rules or a draft from the request.
+func (s *Server) handleEvaluateStremioRelease(c *fiber.Ctx) error {
+	var req EvaluateReleaseRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" {
+		return RespondBadRequest(c, "Release title is required", "")
+	}
+	if err := validateInspectScoring(req.Scoring); err != nil {
+		return RespondValidationError(c, "Invalid scoring configuration", err.Error())
+	}
+
+	scoring := s.buildStremioCoordinatorConfig(s.configManager.GetConfig()).Scoring
+	if req.Scoring != nil {
+		scoring = *req.Scoring
+	}
+
+	eval := stremio.EvaluateRelease(req.Title, &scoring)
+	resp := EvaluateReleaseResponse{
+		Score:            eval.Score,
+		Excluded:         eval.Excluded,
+		ExcludeReason:    eval.ExcludeReason,
+		MatchedLanguages: eval.MatchedLanguages,
+		LanguageBonus:    eval.LanguageBonus,
+		Formats:          make([]EvaluatedFormat, 0, len(eval.MatchedFormats)),
+	}
+	for _, name := range eval.MatchedFormats {
+		for _, f := range scoring.CustomFormats {
+			if f.Name == name {
+				resp.Formats = append(resp.Formats, EvaluatedFormat{ID: f.ID, Name: f.Name, Score: f.Score})
+				break
+			}
+		}
+	}
+	return RespondSuccess(c, resp)
+}
+
 // handleInspectStremioSearch handles POST /api/stremio/search/inspect
 func (s *Server) handleInspectStremioSearch(c *fiber.Ctx) error {
 	ctx := c.Context()

@@ -123,7 +123,7 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 			results := []prowlarr.NZBResult{{Title: sTitle, DownloadURL: "https://prowlarr/dl/1", Size: 1_500_000_000, Indexer: "IdxA"}}
 
 			entries := buildStremioStreamEntries(results, tt.cached, tt.ttlHours, now,
-				"https://host", "thekey", "movie", 0, 0, "tt123", config.ProwlarrConfig{})
+				"https://host", "thekey", "movie", 0, 0, "tt123")
 
 			if len(entries) != 1 {
 				t.Fatalf("expected 1 entry, got %d", len(entries))
@@ -164,7 +164,7 @@ func TestBuildStremioStreamEntries_CachedSortedFirstStable(t *testing.T) {
 	}
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt123", config.ProwlarrConfig{})
+		"https://host", "k", "movie", 0, 0, "tt123")
 
 	if len(entries) != 4 {
 		t.Fatalf("expected 4 entries, got %d", len(entries))

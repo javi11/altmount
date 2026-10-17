@@ -242,7 +242,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 
 	showCachedIndicator := cfg.Stremio.ShowCachedIndicator == nil || *cfg.Stremio.ShowCachedIndicator
 	entries := buildStremioStreamEntries(results, cachedItems, cfg.Stremio.NzbTTLHours, time.Now(),
-		baseURL, key, streamType, season, episode, imdbID, cfg.Stremio.Prowlarr,
+		baseURL, key, streamType, season, episode, imdbID,
 		s.storeStremioReleaseRef)
 	if !showCachedIndicator {
 		for i := range entries {
@@ -654,71 +654,15 @@ func filterStremioResults(
 	return filtered
 }
 
-func calculateStremioReleaseScore(r prowlarr.NZBResult, prowlarrCfg config.ProwlarrConfig) int {
-	score := 0
-	if len(prowlarrCfg.PreferredIndexers) > 0 && r.IndexerID > 0 {
-		for _, id := range prowlarrCfg.PreferredIndexers {
-			if id == r.IndexerID {
-				score += 10000
-				break
-			}
-		}
-	}
-	if len(prowlarrCfg.PreferredIndexerNames) > 0 && r.Indexer != "" {
-		indexerLower := strings.ToLower(r.Indexer)
-		for _, name := range prowlarrCfg.PreferredIndexerNames {
-			name = strings.TrimSpace(name)
-			if name != "" && strings.Contains(indexerLower, strings.ToLower(name)) {
-				score += 10000
-				break
-			}
-		}
-	}
-	if len(prowlarrCfg.PreferredLanguages) > 0 {
-		if prowlarr.MatchesLanguage(r.Title, prowlarrCfg.PreferredLanguages) {
-			score += 5000
-		}
-	}
-	if len(prowlarrCfg.CustomScores) > 0 {
-		for pattern, val := range prowlarrCfg.CustomScores {
-			pattern = strings.TrimSpace(pattern)
-			if pattern == "" {
-				continue
-			}
-			if prowlarr.MatchKeywordOrPattern(r.Title, pattern) {
-				score += val
-			}
-		}
-	}
-	return score
-}
-
-// orderStremioResults stably reorders results so cached releases come first,
-// followed by highest TRaSH/custom score, preserving Prowlarr's publish date within equal groups.
-func orderStremioResults(
-	results []prowlarr.NZBResult,
-	isCached func(safeTitle string) bool,
-	prowlarrCfg config.ProwlarrConfig,
-) []prowlarr.NZBResult {
+// cachedFirst stably moves releases that are already imported (and so play
+// instantly) ahead of the rest, keeping the search's score order within each
+// group. The input slice is not modified: the stream list and the play
+// fallback chain both order the same search results.
+func cachedFirst(results []prowlarr.NZBResult, isCached func(safeTitle string) bool) []prowlarr.NZBResult {
 	ordered := make([]prowlarr.NZBResult, len(results))
 	copy(ordered, results)
-	scores := make(map[string]int, len(results))
-	for _, r := range results {
-		scores[r.Title] = calculateStremioReleaseScore(r, prowlarrCfg)
-	}
-
 	sort.SliceStable(ordered, func(i, j int) bool {
-		cI := isCached(sanitizeFilename(ordered[i].Title))
-		cJ := isCached(sanitizeFilename(ordered[j].Title))
-		if cI != cJ {
-			return cI && !cJ
-		}
-		sI := scores[ordered[i].Title]
-		sJ := scores[ordered[j].Title]
-		if sI != sJ {
-			return sI > sJ
-		}
-		return ordered[i].PublishDate.After(ordered[j].PublishDate)
+		return isCached(sanitizeFilename(ordered[i].Title)) && !isCached(sanitizeFilename(ordered[j].Title))
 	})
 	return ordered
 }
@@ -849,6 +793,13 @@ func (s *Server) buildStremioCoordinatorConfig(cfg *config.Config) stremio.Coord
 		preferredLangs = stremioCfg.Prowlarr.PreferredLanguages
 	}
 
+	// Legacy Prowlarr preferred indexers (by id or name) still rank first.
+	var preferredIndexers []string
+	for _, id := range stremioCfg.Prowlarr.PreferredIndexers {
+		preferredIndexers = append(preferredIndexers, strconv.Itoa(id))
+	}
+	preferredIndexers = append(preferredIndexers, stremioCfg.Prowlarr.PreferredIndexerNames...)
+
 	return stremio.CoordinatorConfig{
 		Provider:        provider,
 		UserAgentMode:   stremioCfg.Indexers.UserAgentMode,
@@ -866,6 +817,7 @@ func (s *Server) buildStremioCoordinatorConfig(cfg *config.Config) stremio.Coord
 			PreferredLanguages:       preferredLangs,
 			RequirePreferredLanguage: stremioCfg.Scoring.RequirePreferredLanguage,
 		},
+		PreferredIndexers: preferredIndexers,
 	}
 }
 
@@ -1045,13 +997,13 @@ func buildStremioStreamEntries(
 	baseURL, key, streamType string,
 	season, episode int,
 	fallbackID string,
-	prowlarrCfg config.ProwlarrConfig,
 	releaseStores ...func(stremioPlayCandidate) (string, error),
 ) []stremioStreamEntry {
 	isCached := stremioCachedPredicate(cached, ttlHours, now)
 
-	// Order first, then build, so entries come out in final order without a second sort.
-	results = orderStremioResults(results, isCached, prowlarrCfg)
+	// Results arrive in the scorer's order (the same score the config page's
+	// testing view shows); only already-imported releases move ahead.
+	results = cachedFirst(results, isCached)
 
 	entries := make([]stremioStreamEntry, 0, len(results))
 	for _, r := range results {

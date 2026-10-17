@@ -41,6 +41,8 @@ import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
+	EvaluateReleaseRequest,
+	EvaluateReleaseResponse,
 	InspectSearchRequest,
 	InspectSearchResponse,
 	PipelineTuneResponse,
@@ -1129,6 +1131,13 @@ class APIClient {
 	}
 
 	// Stremio Search & Ranking Inspector
+	async evaluateStremioRelease(payload: EvaluateReleaseRequest): Promise<EvaluateReleaseResponse> {
+		return this.request<EvaluateReleaseResponse>("/stremio/scoring/evaluate", {
+			method: "POST",
+			body: JSON.stringify(payload),
+		});
+	}
+
 	async inspectStremioSearch(payload: InspectSearchRequest): Promise<InspectSearchResponse> {
 		return this.request<InspectSearchResponse>("/stremio/search/inspect", {
 			method: "POST",

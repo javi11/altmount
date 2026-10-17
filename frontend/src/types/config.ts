@@ -802,8 +802,30 @@ export interface ScoredReleaseItem {
 	score: number;
 	matched_formats: string[];
 	matched_languages: string[];
+	language_bonus?: number;
 	excluded: boolean;
 	exclude_reason?: string;
+}
+
+export interface EvaluateReleaseRequest {
+	title: string;
+	scoring?: StreamScoringConfig;
+}
+
+export interface EvaluatedFormat {
+	id: string;
+	name: string;
+	score: number;
+}
+
+/** How the stream ranking scores one release title. */
+export interface EvaluateReleaseResponse {
+	score: number;
+	excluded: boolean;
+	exclude_reason?: string;
+	matched_languages: string[];
+	language_bonus: number;
+	formats: EvaluatedFormat[];
 }
 
 export interface InspectSearchRequest {
