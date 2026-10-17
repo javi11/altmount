@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/nntppool/v5"
 	"github.com/javi11/nzbparser"
 
+	"github.com/kipsilabs/altmount/internal/importer/parser"
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
 
@@ -37,6 +38,12 @@ func ResolveFromNzb(
 	if n == nil || len(n.Files) == 0 {
 		return nil, fmt.Errorf("%w: empty NZB", ErrUnrepairable)
 	}
+	// Segments the NZB never listed become the same sized placeholders the
+	// importer inserts, so every later article keeps its offset and the gap
+	// is planned as dead articles under the ids the import reads them by.
+	// Without this a volume with a missing segment number looks one article
+	// short of its PAR2 length and the plan is rejected.
+	parser.InsertSegmentGapPlaceholders(n)
 
 	// Split the NZB into PAR2 files and candidate content files.
 	var par2Entries, contentEntries []nzbparser.NzbFile
@@ -87,6 +94,7 @@ func ResolveFromNzb(
 			dead[normalizeMsgID(id)] = true
 		}
 	}
+	markPlaceholdersDead(store, par2Files, dead)
 	if err := releaseSizePrecheck(store.Files, par2Files, caps); err != nil {
 		return nil, err
 	}

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kipsilabs/altmount/internal/holes"
+	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v5"
 )
@@ -68,5 +70,26 @@ func TestCheckFilesTreatsPatchedSegmentAsAvailable(t *testing.T) {
 	}
 	if len(results[0].MissingSegmentIDs) != 0 {
 		t.Fatalf("MissingSegmentIDs = %v, want empty", results[0].MissingSegmentIDs)
+	}
+}
+
+// A gap placeholder that PAR2 repair has rebuilt is served from the patch
+// store, so it is no longer a known miss: a repaired import must not be
+// parked for the same repair again. Unpatched placeholders still count.
+func TestPlaceholderResultsSkipsPatchedGaps(t *testing.T) {
+	p1, p2 := holes.PlaceholderID(2, "s"), holes.PlaceholderID(3, "s")
+	files := []FastFailFile{
+		{Filename: "release.part01.rar", GroupKey: "release", Segments: []*metapb.SegmentData{{Id: "a-1"}, {Id: p1}}},
+		{Filename: "release.part02.rar", GroupKey: "release", Segments: []*metapb.SegmentData{{Id: "b-1"}, {Id: p2}}},
+	}
+
+	results := PlaceholderResults(files, fakePatchIndex{have: map[string]bool{p1: true}})
+
+	if results[0].Broken || results[0].KnownGapCount != 0 || len(results[0].MissingSegmentIDs) != 0 {
+		t.Errorf("fully patched file = %+v, want zero value", results[0])
+	}
+	got := results[1]
+	if !got.Broken || got.KnownGapCount != 1 || len(got.MissingSegmentIDs) != 1 || got.MissingSegmentIDs[0] != p2 {
+		t.Errorf("unpatched gap = %+v, want Broken with only %s", got, p2)
 	}
 }

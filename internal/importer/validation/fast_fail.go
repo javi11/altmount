@@ -247,10 +247,20 @@ func releaseLooksDead(missing, reported int) bool {
 // with files; gap-free files get the zero result. The group is not condemned
 // here: an exactly-known gap is judged against the hole caps by the caller,
 // which can keep a lightly holed archive set importable.
-func PlaceholderResults(files []FastFailFile) []FastFailFileResult {
+//
+// A placeholder with a local patch is not a miss: PAR2 repair rebuilt it under
+// that id and the reader serves the patch. Counting it would park a repaired
+// import for the same repair again.
+func PlaceholderResults(files []FastFailFile, patchIdx PatchIndex) []FastFailFileResult {
 	results := make([]FastFailFileResult, len(files))
 	for fileIdx, file := range files {
-		_, placeholders := splitPlaceholders(file.Segments)
+		_, gaps := splitPlaceholders(file.Segments)
+		var placeholders []*metapb.SegmentData
+		for _, ph := range gaps {
+			if !patched(patchIdx, ph.Id) {
+				placeholders = append(placeholders, ph)
+			}
+		}
 		if len(placeholders) == 0 {
 			continue
 		}
@@ -452,7 +462,7 @@ func FastFailCheckFiles(
 		maxConnections = 1
 	}
 
-	results := PlaceholderResults(files)
+	results := PlaceholderResults(files, patchIdx)
 
 	// brokenGroups records group keys with at least one unreachable segment, so
 	// remaining Stats for those groups can be skipped in later chunks.

@@ -1226,7 +1226,7 @@ func TestPlaceholderResultsMapsDeclaredGapsWithoutStats(t *testing.T) {
 		{Filename: "release.par2"},
 	}
 
-	results := PlaceholderResults(files)
+	results := PlaceholderResults(files, nil)
 
 	if len(results) != len(files) {
 		t.Fatalf("len(results) = %d, want %d (index-aligned)", len(results), len(files))
