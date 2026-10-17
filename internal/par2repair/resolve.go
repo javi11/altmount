@@ -17,6 +17,7 @@ import (
 
 	"github.com/javi11/nntppool/v5"
 
+	"github.com/kipsilabs/altmount/internal/holes"
 	"github.com/kipsilabs/altmount/internal/importer/parser/par2"
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 )
@@ -99,6 +100,7 @@ func Resolve(
 			dead[normalizeMsgID(id)] = true
 		}
 	}
+	markPlaceholdersDead(store, par2Files, dead)
 	if err := releaseSizePrecheck(store.Files, par2Files, caps); err != nil {
 		return nil, err
 	}
@@ -401,6 +403,28 @@ func par2Streams(ctx context.Context, fetch ArticleFetcher, par2Files []SetFile,
 		streams[i] = newLazyFileReader(ctx, fetch, par2Files[i], cache)
 	}
 	return streams
+}
+
+// markPlaceholdersDead marks every gap placeholder (an article the NZB never
+// listed, see holes.PlaceholderID) as dead. No provider holds one, so it is a
+// known-missing article from the start: planned for repair instead of asked
+// for, and its rebuilt payload is stored under the placeholder id that the
+// import and streaming read paths look it up by.
+func markPlaceholdersDead(store *metapb.NzbStore, par2Files []SetFile, dead map[string]bool) {
+	for _, f := range store.Files {
+		for _, seg := range f.Segments {
+			if holes.IsPlaceholderID(seg.Id) {
+				dead[normalizeMsgID(seg.Id)] = true
+			}
+		}
+	}
+	for _, f := range par2Files {
+		for _, a := range f.Articles {
+			if holes.IsPlaceholderID(a.MessageID) {
+				dead[a.MessageID] = true
+			}
+		}
+	}
 }
 
 // releaseArticleIDs collects every article ID of the release: all NzbStore

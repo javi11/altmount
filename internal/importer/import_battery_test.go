@@ -12,11 +12,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kipsilabs/altmount/internal/holes"
 	"github.com/kipsilabs/altmount/internal/importer/multifile"
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
 	"github.com/kipsilabs/altmount/internal/testsupport/nzbbuild"
 	"github.com/kipsilabs/altmount/internal/testsupport/par2gen"
+	"github.com/kipsilabs/altmount/internal/usenet"
 	"github.com/javi11/nntppool/v5"
 	"google.golang.org/protobuf/proto"
 )
@@ -468,6 +470,109 @@ func TestImportBattery_RarWidthMismatchVolumeNaming(t *testing.T) {
 	}
 	if covered < want {
 		t.Errorf("segment coverage %d < file size %d — not all volumes mapped", covered, want)
+	}
+}
+
+// gapPatchIndex is a patch store holding repaired payloads by message ID.
+type gapPatchIndex map[string][]byte
+
+func (g gapPatchIndex) Has(id string) bool { _, ok := g[id]; return ok }
+
+// importVolumeSetWithGap imports the rar_widthmismatch volumes split into
+// 5120-byte segments, with segment 2 of part03 omitted from the NZB, using
+// the given patch store for the gap. It returns the import error and the
+// placeholder id the gap is known by.
+func importVolumeSetWithGap(t *testing.T, patches func(gapID string, payload []byte) gapPatchIndex) (*batteryEnv, error, string) {
+	t.Helper()
+	env := newBatteryEnv(t)
+	matches, err := filepath.Glob(filepath.Join("testdata", "rar_widthmismatch", "archive.part*.rar"))
+	if err != nil {
+		t.Fatalf("glob fixtures: %v", err)
+	}
+	volNum := func(p string) int {
+		b := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "archive.part"), ".rar")
+		n, _ := strconv.Atoi(b)
+		return n
+	}
+	sort.Slice(matches, func(i, j int) bool { return volNum(matches[i]) < volNum(matches[j]) })
+
+	const partSize = 5120
+	var gapID string
+	var gapPayload []byte
+	var files []nzbbuild.File
+	for _, m := range matches {
+		name := filepath.Base(m)
+		data := loadFixture(t, filepath.Join("rar_widthmismatch", name))
+		segs := env.registerContent(fmt.Sprintf("rar-gap-%03d", volNum(m)), data, partSize, 1.0, nil)
+		if name == "archive.part03.rar" {
+			// The importer's placeholder for number 2 is salted with the
+			// file's first segment id; the gap is the second 5120 bytes.
+			gapID = holes.PlaceholderID(2, segs[0].ID)
+			gapPayload = data[partSize : 2*partSize]
+			segs = append(segs[:1:1], segs[2:]...)
+		}
+		files = append(files, nzbbuild.File{Subject: name, Segments: segs})
+	}
+	idx := patches(gapID, gapPayload)
+	env.proc.SetPatchIndex(idx)
+	usenet.SetDefaultPatchLookup(func(segID string) []byte { return idx[segID] })
+	t.Cleanup(func() { usenet.SetDefaultPatchLookup(nil) })
+
+	nzb := nzbbuild.Build(files...)
+	// nzbbuild numbers segments by position; restore part03's real numbering
+	// so the omitted article reads as a gap, not a renumbered tail.
+	for i := range nzb.Files {
+		if nzb.Files[i].Filename == "archive.part03.rar" {
+			for j := range nzb.Files[i].Segments {
+				if j > 0 {
+					nzb.Files[i].Segments[j].Number = j + 2
+				}
+			}
+		}
+	}
+	_, _, err = env.runImport(nzb, "archive")
+	return env, err, gapID
+}
+
+// TestImportBattery_RepairedNzbGapImportsHealthy closes the loop for an NZB
+// that never listed one article. PAR2 repair rebuilds the gap under the
+// importer's placeholder id; the re-import must then treat it as present —
+// not a known miss that parks the import for the same repair again — and
+// read the repaired bytes, so the inner file imports whole.
+func TestImportBattery_RepairedNzbGapImportsHealthy(t *testing.T) {
+	entries := loadManifest(t, "rar_widthmismatch")
+	env, err, gapID := importVolumeSetWithGap(t, func(gapID string, payload []byte) gapPatchIndex {
+		return gapPatchIndex{gapID: payload}
+	})
+	if err != nil {
+		t.Fatalf("import of a release whose only gap is repaired failed: %v", err)
+	}
+	assertInnerFile(t, env, "/archive", entries)
+	want := int64(entries[0].Size)
+	for _, name := range env.listDir("/archive") {
+		meta := env.readMeta("/archive/" + name)
+		if meta.FileSize != want {
+			continue
+		}
+		if len(meta.KnownHoles) != 0 || meta.Status == metapb.FileStatus_FILE_STATUS_DEGRADED {
+			t.Fatalf("repaired gap %s imported as damage: status=%v holes=%v", gapID, meta.Status, meta.KnownHoles)
+		}
+	}
+}
+
+// Control for the test above: with no patch, the same gap is still damage.
+func TestImportBattery_UnrepairedNzbGapIsDamage(t *testing.T) {
+	entries := loadManifest(t, "rar_widthmismatch")
+	env, err, _ := importVolumeSetWithGap(t, func(string, []byte) gapPatchIndex { return gapPatchIndex{} })
+	if err != nil {
+		return // rejected as damaged
+	}
+	want := int64(entries[0].Size)
+	for _, name := range env.listDir("/archive") {
+		meta := env.readMeta("/archive/" + name)
+		if meta.FileSize == want && len(meta.KnownHoles) == 0 && meta.Status != metapb.FileStatus_FILE_STATUS_DEGRADED {
+			t.Fatal("unrepaired gap imported as healthy")
+		}
 	}
 }
 

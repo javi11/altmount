@@ -474,7 +474,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 		// The provider has everything the NZB lists. Gaps the NZB itself
 		// declares are mapped from their placeholders without a STAT; the
 		// per-file sweep would only re-learn what the probe just answered.
-		results = validation.PlaceholderResults(fastFailFiles)
+		results = validation.PlaceholderResults(fastFailFiles, proc.patchIndex)
 		if !anyBroken(results) {
 			if proc.log != nil {
 				proc.log.DebugContext(ctx, "Fast-fail release probe passed",
