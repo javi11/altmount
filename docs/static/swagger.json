@@ -3576,8 +3576,10 @@
                         "enum": [
                             "pending",
                             "processing",
+                            "waiting_repair",
                             "completed",
-                            "failed"
+                            "failed",
+                            "fallback"
                         ],
                         "type": "string",
                         "description": "Filter by status",
