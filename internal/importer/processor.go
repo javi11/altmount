@@ -78,6 +78,18 @@ func shouldDeferForRepair(enabled, hasPar2, brokenInSet bool) bool {
 	return enabled && hasPar2 && brokenInSet
 }
 
+// repairOnImport reports whether an import may queue PAR2 repairs or park for
+// one. With stremio.skip_repair a Stremio import never does: playback cannot
+// wait for a repair, so a release that needs one fails and Stremio falls back
+// to the next.
+func repairOnImport(cfg *config.Config, category, downloadID *string) bool {
+	if !cfg.Par2Repair.EffectiveRepairOnImport() {
+		return false
+	}
+	stremio := (category != nil && *category == "stremio") || (downloadID != nil && strings.HasPrefix(*downloadID, "stremio:"))
+	return !(stremio && cfg.Stremio.EffectiveSkipRepair())
+}
+
 // fastFailOutcome decides what the sweep does with a damaged release:
 // defer for repair, or bail out because nothing importable remains.
 //
@@ -711,7 +723,7 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	// Deferral is decided before the bail-out below: a fully damaged archive
 	// set trips both, and repair is the better outcome. See fastFailOutcome.
 	deferForRepair, bailOut := fastFailOutcome(
-		cfg.Par2Repair.EffectiveRepairOnImport(), nzbHasPar2, archiveSetDamaged,
+		repairOnImport(cfg, category, downloadID), nzbHasPar2, archiveSetDamaged,
 		eligibleRegularCount, len(brokenIdx),
 	)
 	if deferForRepair {
@@ -1253,9 +1265,9 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		// Damaged-but-imported files get a PAR2 repair queued now, while the
 		// release's recovery volumes are most likely still retrievable.
 		proc.persistKnownHoles(ctx, writtenPaths, degradedFiles, missingIDs, cfg.ProviderFingerprint())
-		proc.queueImportRepairs(ctx, cfg.Par2Repair.EffectiveRepairOnImport(), writtenPaths, degradedFiles)
+		proc.queueImportRepairs(ctx, repairOnImport(cfg, category, downloadID), writtenPaths, degradedFiles)
 		proc.updateProgress(queueID, 100)
-	} else if repairEnabled, hasPar2 := cfg.Par2Repair.EffectiveRepairOnImport(), len(par2Files) > 0; shouldDeferCorruptArchive(err, repairEnabled, hasPar2) || shouldDeferMissingArchive(err, repairEnabled, hasPar2) {
+	} else if repairEnabled, hasPar2 := repairOnImport(cfg, category, downloadID), len(par2Files) > 0; shouldDeferCorruptArchive(err, repairEnabled, hasPar2) || shouldDeferMissingArchive(err, repairEnabled, hasPar2) {
 		// Corrupt-but-present articles, or an article the fast-fail probe's
 		// sample missed, broke the archive analysis. Park the import for an
 		// NZB-mode repair whose verify sweep checks every article against the

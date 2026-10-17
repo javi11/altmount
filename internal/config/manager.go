@@ -463,6 +463,10 @@ type StremioConfig struct {
 	// immediately on the release-level probe when missing articles are detected,
 	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
 	FastFailHeaderOnly *bool `yaml:"fast_fail_header_only" mapstructure:"fast_fail_header_only" json:"fast_fail_header_only"`
+	// SkipRepair when true fails a Stremio-originated import that would need a
+	// PAR2 repair instead of parking it for one, so playback falls back to the
+	// next release rather than waiting. Defaults to false.
+	SkipRepair *bool `yaml:"skip_repair" mapstructure:"skip_repair" json:"skip_repair,omitempty"`
 	// BaseURL is the public base URL used when building Stremio stream links
 	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
 	// request origin when not set.
@@ -506,6 +510,11 @@ func (s StremioConfig) EffectiveFastFailHeaderOnly() bool {
 		return true
 	}
 	return *s.FastFailHeaderOnly
+}
+
+// EffectiveSkipRepair reports whether Stremio imports skip PAR2 repair.
+func (s StremioConfig) EffectiveSkipRepair() bool {
+	return s.SkipRepair != nil && *s.SkipRepair
 }
 
 // AuthConfig represents authentication configuration

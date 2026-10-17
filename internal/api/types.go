@@ -274,6 +274,7 @@ type StremioAPIResponse struct {
 	FailedReleaseTTLHours int                        `json:"failed_release_ttl_hours"`
 	MaxFallbackReleases   int                        `json:"max_fallback_releases"`
 	FastFailHeaderOnly    bool                       `json:"fast_fail_header_only"`
+	SkipRepair            bool                       `json:"skip_repair"`
 	IncludeLibraryStreams *bool                      `json:"include_library_streams,omitempty"`
 	BaseURL               string                     `json:"base_url,omitempty"`
 	Indexers              StremioIndexersAPIResponse `json:"indexers"`
@@ -528,6 +529,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FailedReleaseTTLHours: cfg.Stremio.FailedReleaseTTLHours,
 		MaxFallbackReleases:   cfg.Stremio.MaxFallbackReleases,
 		FastFailHeaderOnly:    cfg.Stremio.EffectiveFastFailHeaderOnly(),
+		SkipRepair:            cfg.Stremio.EffectiveSkipRepair(),
 		IncludeLibraryStreams: cfg.Stremio.IncludeLibraryStreams,
 		BaseURL:               cfg.Stremio.BaseURL,
 		Indexers: StremioIndexersAPIResponse{
