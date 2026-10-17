@@ -689,6 +689,53 @@ func TestPreParseFastFailStremioHeaderOnly(t *testing.T) {
 	}
 }
 
+// A Stremio release whose only missing article is its .nfo (indexers often
+// post it separately, and it expires on its own) must not be failed by the
+// header-only abort: the video imports and only the .nfo is dropped.
+func TestPreParseFastFailStremioHeaderOnlyIgnoresMissingSidecar(t *testing.T) {
+	client := fakepool.New()
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	n := buildMultiSegmentNzb(client, "StremioShow.S01E01.mkv", 50)
+	nfo := buildMultiSegmentNzb(client, "StremioShow.S01E01.nfo", 1, 0)
+	n.Files = append(n.Files, nfo.Files...)
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+	stremioCat := "stremio"
+
+	brokenIdx, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, &stremioCat, nil)
+	if err != nil {
+		t.Fatalf("missing .nfo failed the release: %v", err)
+	}
+	if _, ok := brokenIdx[1]; !ok || len(brokenIdx) != 1 {
+		t.Fatalf("brokenIdx = %v, want only the .nfo (index 1)", brokenIdx)
+	}
+}
+
+// A missing video article still aborts immediately, even when a sidecar is
+// missing too.
+func TestPreParseFastFailStremioHeaderOnlyStillFailsDamagedMedia(t *testing.T) {
+	client := fakepool.New()
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	n := buildMultiSegmentNzb(client, "StremioShow.S01E01.mkv", 50, 10)
+	nfo := buildMultiSegmentNzb(client, "StremioShow.S01E01.nfo", 1, 0)
+	n.Files = append(n.Files, nfo.Files...)
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+	cfg.Health.AcceptableMissingSegmentsPercentage = 0
+	stremioCat := "stremio"
+
+	_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, &stremioCat, nil)
+	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
+		t.Fatalf("err = %v, want ErrNoFilesProcessed", err)
+	}
+}
+
 func TestCalculateVirtualDirectory(t *testing.T) {
 	tests := []struct {
 		name         string
