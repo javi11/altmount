@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,13 +54,38 @@ func transformQueueError(err *string) string {
 	return *err
 }
 
+// queueStatusFilters are the statuses GET /queue can filter by: every status
+// the import_queue status CHECK constraint allows. waiting_repair (imports
+// parked for a PAR2 repair) has its own Queue page tab, which this list
+// previously rejected.
+var queueStatusFilters = []database.QueueStatus{
+	database.QueueStatusPending,
+	database.QueueStatusProcessing,
+	database.QueueStatusWaitingRepair,
+	database.QueueStatusCompleted,
+	database.QueueStatusFailed,
+	database.QueueStatusFallback,
+}
+
+var queueStatusFilterValues = func() string {
+	names := make([]string, len(queueStatusFilters))
+	for i, st := range queueStatusFilters {
+		names[i] = string(st)
+	}
+	return strings.Join(names, ", ")
+}()
+
+func validQueueStatusFilter(status database.QueueStatus) bool {
+	return slices.Contains(queueStatusFilters, status)
+}
+
 // handleListQueue handles GET /api/queue
 //
 //	@Summary		List queue items
 //	@Description	Returns a paginated list of NZB download queue items with optional filters.
 //	@Tags			Queue
 //	@Produce		json
-//	@Param			status		query	string	false	"Filter by status"			Enums(pending,processing,completed,failed)
+//	@Param			status		query	string	false	"Filter by status"			Enums(pending,processing,waiting_repair,completed,failed,fallback)
 //	@Param			search		query	string	false	"Search by filename"
 //	@Param			sort_by		query	string	false	"Sort field"				Enums(created_at,updated_at,status,nzb_path)
 //	@Param			sort_order	query	string	false	"Sort direction"			Enums(asc,desc)
@@ -79,14 +105,10 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	var statusFilter *database.QueueStatus
 	if statusStr := c.Query("status"); statusStr != "" {
 		status := database.QueueStatus(statusStr)
-		// Validate status
-		switch status {
-		case database.QueueStatusPending, database.QueueStatusProcessing,
-			database.QueueStatusCompleted, database.QueueStatusFailed:
-			statusFilter = &status
-		default:
-			return RespondValidationError(c, "Invalid status filter", "Valid values: pending, processing, completed, failed")
+		if !validQueueStatusFilter(status) {
+			return RespondValidationError(c, "Invalid status filter", "Valid values: "+queueStatusFilterValues)
 		}
+		statusFilter = &status
 	}
 
 	// Parse search parameter

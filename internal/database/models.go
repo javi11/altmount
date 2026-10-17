@@ -74,6 +74,9 @@ type QueueStats struct {
 	TotalProcessing     int       `db:"total_processing"`
 	TotalCompleted      int       `db:"total_completed"`
 	TotalFailed         int       `db:"total_failed"`
+	// TotalWaitingRepair counts imports parked for a PAR2 repair. Counted
+	// live; queue_stats has no column for it.
+	TotalWaitingRepair  int       `db:"-"`
 	AvgProcessingTimeMs *int      `db:"avg_processing_time_ms"`
 	LastUpdated         time.Time `db:"last_updated"`
 }

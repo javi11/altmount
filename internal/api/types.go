@@ -659,6 +659,7 @@ type QueueStatsResponse struct {
 	TotalProcessing     int       `json:"total_processing"`
 	TotalCompleted      int       `json:"total_completed"`
 	TotalFailed         int       `json:"total_failed"`
+	TotalWaitingRepair  int       `json:"total_waiting_repair"`
 	AvgProcessingTimeMs *int      `json:"avg_processing_time_ms"`
 	LastUpdated         time.Time `json:"last_updated"`
 }
@@ -918,6 +919,7 @@ func ToQueueStatsResponse(stats *database.QueueStats) *QueueStatsResponse {
 		TotalProcessing:     stats.TotalProcessing,
 		TotalCompleted:      stats.TotalCompleted,
 		TotalFailed:         stats.TotalFailed,
+		TotalWaitingRepair:  stats.TotalWaitingRepair,
 		AvgProcessingTimeMs: stats.AvgProcessingTimeMs,
 		LastUpdated:         stats.LastUpdated,
 	}

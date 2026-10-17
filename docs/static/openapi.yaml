@@ -2348,8 +2348,10 @@ paths:
             enum:
               - pending
               - processing
+              - waiting_repair
               - completed
               - failed
+              - fallback
         - description: Search by filename
           in: query
           name: search

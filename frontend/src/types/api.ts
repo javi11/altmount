@@ -71,6 +71,7 @@ export interface QueueStats {
 	total_processing: number;
 	total_completed: number;
 	total_failed: number;
+	total_waiting_repair: number;
 	avg_processing_time_ms: number;
 	last_updated: string;
 }

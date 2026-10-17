@@ -724,6 +724,10 @@ func (r *Repository) GetQueueStats(ctx context.Context) (*QueueStats, error) {
 		return nil, fmt.Errorf("failed to get queue stats: %w", err)
 	}
 
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM import_queue WHERE status = 'waiting_repair'`).Scan(&stats.TotalWaitingRepair); err != nil {
+		return nil, fmt.Errorf("failed to count imports waiting for repair: %w", err)
+	}
+
 	return &stats, nil
 }
 
