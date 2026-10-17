@@ -119,3 +119,77 @@ func TestShouldSkipFirstSegmentFetchPar2RecoveryVolumes(t *testing.T) {
 		t.Fatal("a small .par2 may be the index; it must be fetched")
 	}
 }
+
+// Obfuscated posts randomise the "(1/N)" subject totals: every volume ends at
+// the same segment while each claims a different total. Those totals must not
+// conjure tail gaps — doing so parked a complete 275-file release for a PAR2
+// repair it never needed.
+func TestInsertSegmentGapPlaceholdersIgnoresRandomisedSubjectTotals(t *testing.T) {
+	run := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	n := &nzbparser.Nzb{Files: nzbparser.NzbFiles{
+		gapTestFile(run, 12),
+		gapTestFile(run, 13),
+		gapTestFile(run, 11),
+		gapTestFile([]int{1, 2, 4, 5, 6, 7, 8, 9, 10}, 10), // a real interior gap
+	}}
+	if got := InsertSegmentGapPlaceholders(n); got != 1 {
+		t.Fatalf("inserted = %d, want only the interior gap", got)
+	}
+	for i := range 3 {
+		if len(n.Files[i].Segments) != 10 {
+			t.Fatalf("file %d grew to %d segments from a fake total", i, len(n.Files[i].Segments))
+		}
+	}
+}
+
+// A truncated post is consistent: files that stop early agree on what the
+// total should be, so their tail gaps are still filled.
+func TestInsertSegmentGapPlaceholdersKeepsConsistentTailGaps(t *testing.T) {
+	run := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	n := &nzbparser.Nzb{Files: nzbparser.NzbFiles{
+		gapTestFile(run, 12), gapTestFile(run, 12), gapTestFile(run, 12),
+	}}
+	if got := InsertSegmentGapPlaceholders(n); got != 6 {
+		t.Fatalf("inserted = %d, want 6 tail placeholders", got)
+	}
+}
+
+// Two files that end together but disagree on their totals are not enough
+// evidence to discard every total in the release: their tails are filled.
+func TestInsertSegmentGapPlaceholdersNeedsThreeFilesToDistrustTotals(t *testing.T) {
+	run := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	n := &nzbparser.Nzb{Files: nzbparser.NzbFiles{gapTestFile(run, 12), gapTestFile(run, 13)}}
+	if got := InsertSegmentGapPlaceholders(n); got != 5 {
+		t.Fatalf("inserted = %d, want 5 tail placeholders (2 + 3)", got)
+	}
+}
+
+// Files cut short at different points are what real truncation looks like:
+// no two of them end at the same segment, so their declared totals stand and
+// each tail is filled.
+func TestInsertSegmentGapPlaceholdersFillsTailsThatEndApart(t *testing.T) {
+	n := &nzbparser.Nzb{Files: nzbparser.NzbFiles{
+		gapTestFile([]int{1, 2, 3, 4, 5, 6, 7, 8}, 10),
+		gapTestFile([]int{1, 2, 3, 4, 5, 6, 7, 8, 9}, 11),
+		gapTestFile([]int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 12),
+	}}
+	if got := InsertSegmentGapPlaceholders(n); got != 6 {
+		t.Fatalf("inserted = %d, want 6 tail placeholders (2 per file)", got)
+	}
+}
+
+// Distrust is release-wide: once the totals are shown to be noise, no file's
+// total is used for a tail gap, even one that ends elsewhere.
+func TestInsertSegmentGapPlaceholdersDistrustAppliesToWholeRelease(t *testing.T) {
+	run := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	other := gapTestFile([]int{1, 2, 3, 4, 5, 6, 7, 8}, 10)
+	n := &nzbparser.Nzb{Files: nzbparser.NzbFiles{
+		gapTestFile(run, 12), gapTestFile(run, 13), gapTestFile(run, 14), other,
+	}}
+	if got := InsertSegmentGapPlaceholders(n); got != 0 {
+		t.Fatalf("inserted = %d, want 0", got)
+	}
+	if len(n.Files[3].Segments) != 8 {
+		t.Fatalf("file ending elsewhere grew to %d segments from a distrusted total", len(n.Files[3].Segments))
+	}
+}
