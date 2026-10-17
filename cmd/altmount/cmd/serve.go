@@ -179,7 +179,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
-	stremioCleanup := stremio.NewStremioCleanupService(repos.MainRepo, metadataService, configManager.GetConfigGetter())
+	stremioCleanup := stremio.NewStremioCleanupService(repos.MainRepo, metadataService, repos.HealthRepo, configManager.GetConfigGetter())
 	stremioCleanup.StartCleanup(ctx)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, cacheSource)
