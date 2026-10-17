@@ -1,6 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import type { HealthCleanupRequest, HealthPriority } from "../types/api";
+import type {
+	HealthCleanupRequest,
+	HealthPriority,
+	LibraryAuditCleanupRequest,
+} from "../types/api";
 
 // Queue hooks
 export const useQueue = (params?: {
@@ -187,6 +191,22 @@ export const useHealthStats = () => {
 	return useQuery({
 		queryKey: ["health", "stats"],
 		queryFn: () => apiClient.getHealthStats(),
+	});
+};
+
+export const useLibraryAuditScan = () => {
+	return useMutation({
+		mutationFn: (graceHours?: number) => apiClient.scanLibraryAudit(graceHours),
+	});
+};
+
+export const useLibraryAuditCleanup = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (data: LibraryAuditCleanupRequest) => apiClient.cleanupLibraryAudit(data),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
 	});
 };
 

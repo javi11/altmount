@@ -257,6 +257,56 @@ export interface Par2RepairJob {
 	progress_stage_elapsed_seconds?: number;
 }
 
+/** One finding of a library audit. */
+export interface LibraryAuditItem {
+	/** Orphan: AltMount virtual path. Dead symlink: the library symlink path. */
+	path: string;
+	/** Dead symlink: where it points. */
+	target?: string;
+	/** Orphan: file size in bytes. */
+	size?: number;
+	/** Orphan: when it was imported. */
+	created_at?: string;
+	/** Dead symlink: in the library, or in AltMount's own import folder. */
+	location?: "library" | "import";
+}
+
+/** Library vs AltMount comparison: orphans and dead symlinks. */
+export interface LibraryAudit {
+	scanned_at: string;
+	library_dir: string;
+	mount_path: string;
+	/** AltMount's import folder (symlink import strategy), when configured. */
+	import_dir?: string;
+	files_scanned: number;
+	symlinks_scanned: number;
+	/** Links in the import folder; they never count as library references. */
+	import_symlinks_scanned: number;
+	orphans: LibraryAuditItem[];
+	dead_symlinks: LibraryAuditItem[];
+	/** Unreferenced files left out of `orphans` because they are newer than the grace period. */
+	skipped_recent: number;
+	grace_period_seconds: number;
+	walk_errors: number;
+	/** Why orphans may not be deleted right now (library looks unreadable). */
+	orphan_cleanup_blocked?: string;
+	warning?: string;
+}
+
+export interface LibraryAuditCleanupRequest {
+	orphans: string[];
+	dead_symlinks: string[];
+	grace_hours?: number;
+}
+
+export interface LibraryAuditCleanupResult {
+	orphans_deleted: number;
+	dead_symlinks_removed: number;
+	skipped: { path: string; reason: string }[];
+	/** The library as it stands after the cleanup. */
+	audit: LibraryAudit;
+}
+
 export interface HealthStats {
 	total: number;
 	pending: number;

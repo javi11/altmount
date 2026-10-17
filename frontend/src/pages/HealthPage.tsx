@@ -44,6 +44,7 @@ import { HealthFilters } from "./HealthPage/components/HealthFilters";
 import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
+import { LibraryAuditSection } from "./HealthPage/components/LibraryAuditSection";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
 import { Par2RepairSection } from "./HealthPage/components/Par2RepairSection";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
@@ -914,6 +915,8 @@ export function HealthPage() {
 								onCancelAll={handleCancelAllPar2Repairs}
 								isCancelling={cancelPar2Repair.isPending || cancelAllPar2Repairs.isPending}
 							/>
+
+							<LibraryAuditSection />
 
 							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-4 sm:p-8">
