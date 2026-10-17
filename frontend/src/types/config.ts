@@ -851,6 +851,7 @@ export interface StremioConfig {
 	max_fallback_releases: number;
 	include_library_streams?: boolean;
 	fast_fail_header_only?: boolean;
+	skip_repair?: boolean;
 	prowlarr: ProwlarrConfig;
 }
 

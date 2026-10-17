@@ -1,13 +1,19 @@
 package importer
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/javi11/nntppool/v5"
 	"github.com/javi11/rardecode/v2"
 
+	"github.com/kipsilabs/altmount/internal/config"
 	alterrors "github.com/kipsilabs/altmount/internal/errors"
+	"github.com/kipsilabs/altmount/internal/importer/multifile"
+	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
 )
 
 // A damaged archive set with PAR2 files defers for repair instead of being
@@ -171,5 +177,83 @@ func TestMergeDegradedFilesCombinesSweepAndParserFindings(t *testing.T) {
 	}
 	if empty := mergeDegradedFiles(nil, nil); empty != nil {
 		t.Errorf("merging two nil maps should stay nil, got %+v", empty)
+	}
+}
+
+// With stremio.skip_repair, Stremio imports never queue or wait for a repair;
+// other imports follow repair_on_import alone.
+func TestRepairOnImportStremioSkipRepair(t *testing.T) {
+	on, off := true, false
+	stremioCat, tvCat := "stremio", "tv"
+	stremioID, sabID := "stremio:abc", "SABnzbd_nzo_1"
+	tests := []struct {
+		name       string
+		skip       *bool
+		category   *string
+		downloadID *string
+		want       bool
+	}{
+		{"library import, skip on", &on, &tvCat, &sabID, true},
+		{"stremio download id, skip on", &on, &tvCat, &stremioID, false},
+		{"stremio category, skip on", &on, &stremioCat, nil, false},
+		{"stremio import, skip off", &off, &tvCat, &stremioID, true},
+		{"stremio import, skip unset", nil, &tvCat, &stremioID, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Par2Repair.Enabled = &on
+			cfg.Par2Repair.RepairOnImport = &on
+			cfg.Stremio.SkipRepair = tt.skip
+			if got := repairOnImport(cfg, tt.category, tt.downloadID); got != tt.want {
+				t.Fatalf("repairOnImport = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Stremio.SkipRepair = &on
+	if repairOnImport(cfg, &tvCat, &sabID) {
+		t.Fatal("repair_on_import off must still disable repair")
+	}
+}
+
+// A damaged archive set that would park for repair fails instead when it is a
+// Stremio import and stremio.skip_repair is on, so playback can fall back.
+func TestPreParseFastFailStremioSkipRepairFailsInsteadOfDeferring(t *testing.T) {
+	for _, skip := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip_repair=%v", skip), func(t *testing.T) {
+			client := fakepool.New()
+			client.SetBehavior("a2-missing", fakepool.SegmentBehavior{Err: nntppool.ErrArticleNotFound})
+			proc := &Processor{
+				poolManager:       processorTestPoolManager{client: client},
+				validationTimeout: 100 * time.Millisecond,
+			}
+			n := buildTestNzb([]testNzbFile{
+				{name: "Show.S01E01.part01.rar", segID: "a1"},
+				{name: "Show.S01E01.part02.rar", segID: "a2-missing"},
+				{name: "Show.S01E01.par2", segID: "p1"},
+			})
+			on, off := true, false
+			cfg := config.DefaultConfig()
+			cfg.Import.SegmentSamplePercentage = 100
+			cfg.Par2Repair.Enabled = &on
+			cfg.Par2Repair.RepairOnImport = &on
+			cfg.Stremio.FastFailHeaderOnly = &off
+			cfg.Stremio.SkipRepair = &skip
+			downloadID := "stremio:abc"
+
+			_, _, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, nil, &downloadID)
+			var deferred *DeferredRepairError
+			if skip {
+				if !errors.Is(err, multifile.ErrNoFilesProcessed) {
+					t.Fatalf("err = %v, want ErrNoFilesProcessed", err)
+				}
+				return
+			}
+			if !errors.As(err, &deferred) {
+				t.Fatalf("err = %v, want DeferredRepairError", err)
+			}
+		})
 	}
 }

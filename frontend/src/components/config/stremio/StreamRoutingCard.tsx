@@ -21,6 +21,7 @@ export function StreamRoutingCard({
 	const failedTtlHours = config.failed_release_ttl_hours ?? 24;
 	const maxFallbacks = config.max_fallback_releases ?? 2;
 	const fastFailHeader = config.fast_fail_header_only ?? true;
+	const skipRepair = config.skip_repair ?? false;
 
 	const [libraryCount, setLibraryCount] = useState<number | null>(null);
 
@@ -307,6 +308,26 @@ export function StreamRoutingCard({
 							checked={fastFailHeader}
 							disabled={isReadOnly}
 							onChange={(e) => onChange({ fast_fail_header_only: e.target.checked })}
+						/>
+					</div>
+
+					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+						<div className="min-w-0 flex-1">
+							<div className="flex items-center gap-2">
+								<Zap className="h-4 w-4 text-warning" />
+								<span className="font-semibold text-sm">Don't Repair Stremio Downloads</span>
+							</div>
+							<p className="mt-1 text-base-content/60 text-xs">
+								Fail a release that needs a PAR2 repair instead of waiting for one, so playback
+								falls back to the next release straight away.
+							</p>
+						</div>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary shrink-0"
+							checked={skipRepair}
+							disabled={isReadOnly}
+							onChange={(e) => onChange({ skip_repair: e.target.checked })}
 						/>
 					</div>
 				</div>
