@@ -1,7 +1,9 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/kipsilabs/altmount/internal/health"
@@ -82,4 +84,64 @@ func (h *LibrarySyncHandlers) handleGetSyncNeeded(c *fiber.Ctx) error {
 		"needs_sync": needsSync,
 		"reason":     reason,
 	})
+}
+
+// LibraryAuditRequest is the body of the library audit scan and cleanup
+// endpoints. GraceHours keeps files imported more recently than this out of
+// the orphan list (default 24); 0 disables the grace period.
+type LibraryAuditRequest struct {
+	GraceHours   *float64 `json:"grace_hours"`
+	Orphans      []string `json:"orphans"`
+	DeadSymlinks []string `json:"dead_symlinks"`
+}
+
+func (r LibraryAuditRequest) grace() time.Duration {
+	if r.GraceHours == nil {
+		return health.DefaultAuditGracePeriod
+	}
+	if *r.GraceHours <= 0 {
+		return 0
+	}
+	return time.Duration(*r.GraceHours * float64(time.Hour))
+}
+
+// handleLibraryAuditScan handles POST /api/health/library-audit/scan: a dry
+// run listing AltMount files no library symlink points at, and library
+// symlinks whose AltMount file is gone.
+func (h *LibrarySyncHandlers) handleLibraryAuditScan(c *fiber.Ctx) error {
+	var req LibraryAuditRequest
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return RespondBadRequest(c, "Invalid request body", err.Error())
+		}
+	}
+	audit, err := h.librarySyncWorker.AuditLibrary(c.Context(), req.grace())
+	if err != nil {
+		return RespondValidationError(c, "Library audit failed", err.Error())
+	}
+	return RespondSuccess(c, audit)
+}
+
+// handleLibraryAuditCleanup handles POST /api/health/library-audit/cleanup:
+// deletes the listed orphans and dead symlinks that a fresh scan still finds.
+func (h *LibrarySyncHandlers) handleLibraryAuditCleanup(c *fiber.Ctx) error {
+	var req LibraryAuditRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+	if len(req.Orphans) == 0 && len(req.DeadSymlinks) == 0 {
+		return RespondValidationError(c, "Nothing selected to clean up", "")
+	}
+	result, err := h.librarySyncWorker.CleanupLibraryAudit(c.Context(), req.Orphans, req.DeadSymlinks, req.grace())
+	switch {
+	case errors.Is(err, health.ErrLibrarySyncInProgress):
+		return RespondConflict(c, "Library sync is running", err.Error())
+	case err != nil:
+		return RespondValidationError(c, "Library audit cleanup failed", err.Error())
+	}
+	slog.InfoContext(c.Context(), "Library audit cleanup finished",
+		"orphans_deleted", result.OrphansDeleted,
+		"dead_symlinks_removed", result.DeadSymlinksRemoved,
+		"skipped", len(result.Skipped))
+	return RespondSuccess(c, result)
 }

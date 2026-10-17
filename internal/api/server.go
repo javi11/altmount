@@ -313,6 +313,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/library-sync/start", s.handleStartLibrarySync)
 	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
 	api.Post("/health/library-sync/dry-run", s.handleDryRunLibrarySync)
+	api.Post("/health/library-audit/scan", s.handleLibraryAuditScan)
+	api.Post("/health/library-audit/cleanup", s.handleLibraryAuditCleanup)
 
 	api.Get("/metadata/corrupted", s.handleGetCorruptedMetadata)
 	api.Delete("/metadata/corrupted", s.handlePurgeCorruptedMetadata)
@@ -583,6 +585,22 @@ func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 
 	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleCancelLibrarySync(c)
+}
+
+// handleLibraryAuditScan handles POST /api/health/library-audit/scan
+func (s *Server) handleLibraryAuditScan(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return RespondServiceUnavailable(c, "Library sync is not available", "")
+	}
+	return NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager).handleLibraryAuditScan(c)
+}
+
+// handleLibraryAuditCleanup handles POST /api/health/library-audit/cleanup
+func (s *Server) handleLibraryAuditCleanup(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return RespondServiceUnavailable(c, "Library sync is not available", "")
+	}
+	return NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager).handleLibraryAuditCleanup(c)
 }
 
 // handleDryRunLibrarySync handles POST /api/health/library-sync/dry-run

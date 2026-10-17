@@ -15,6 +15,9 @@ import type {
 	HealthWorkerStatus,
 	ImportHistoryItem,
 	ImportStatusResponse,
+	LibraryAudit,
+	LibraryAuditCleanupRequest,
+	LibraryAuditCleanupResult,
 	LibrarySyncStatus,
 	ManualScanRequest,
 	MetadataMigrationResult,
@@ -526,6 +529,20 @@ class APIClient {
 
 	async getHealthWorkerStatus() {
 		return this.request<HealthWorkerStatus>("/health/worker/status");
+	}
+
+	async scanLibraryAudit(graceHours?: number) {
+		return this.request<LibraryAudit>("/health/library-audit/scan", {
+			method: "POST",
+			body: JSON.stringify(graceHours === undefined ? {} : { grace_hours: graceHours }),
+		});
+	}
+
+	async cleanupLibraryAudit(data: LibraryAuditCleanupRequest) {
+		return this.request<LibraryAuditCleanupResult>("/health/library-audit/cleanup", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
 	}
 
 	async getLibrarySyncStatus() {
