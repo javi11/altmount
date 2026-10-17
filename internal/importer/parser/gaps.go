@@ -33,19 +33,70 @@ func gapWithinBounds(missing, expected int) bool {
 //
 // Gaps are detected from segment numbers (1-based, contiguous when
 // complete) and from the total the subject declares when it exceeds the
-// highest number present. Returns the number of placeholders inserted.
+// highest number present — unless the release's subject totals are evidently
+// made up (see subjectTotalsTrusted). Returns the number of placeholders
+// inserted.
 func InsertSegmentGapPlaceholders(n *nzbparser.Nzb) int {
 	if n == nil {
 		return 0
 	}
+	trustTotals := subjectTotalsTrusted(n)
 	inserted := 0
 	for i := range n.Files {
-		inserted += fillFileGaps(&n.Files[i])
+		inserted += fillFileGaps(&n.Files[i], trustTotals)
 	}
 	return inserted
 }
 
-func fillFileGaps(f *nzbparser.NzbFile) int {
+// minTailGapEvidence is how many files must end at the same segment number
+// before their disagreeing subject totals count as evidence of fake totals.
+const minTailGapEvidence = 3
+
+// subjectTotalsTrusted reports whether the "(1/N)" totals in the release's
+// subjects can be believed for tail gaps. Obfuscating posters randomise N:
+// every volume then ends at the same segment number (volumes share one size)
+// while each subject claims a different total. A genuinely truncated post
+// cannot look like that, so when several files end at one number but declare
+// different totals, the totals are noise and only gaps inside the numbering
+// are filled.
+func subjectTotalsTrusted(n *nzbparser.Nzb) bool {
+	totalsByEnd := map[int]map[int]struct{}{}
+	filesByEnd := map[int]int{}
+	for _, f := range n.Files {
+		end, contiguous := segmentRun(f.Segments)
+		if !contiguous || f.TotalSegments <= end {
+			continue // complete, or a gap inside the numbering
+		}
+		if totalsByEnd[end] == nil {
+			totalsByEnd[end] = map[int]struct{}{}
+		}
+		totalsByEnd[end][f.TotalSegments] = struct{}{}
+		filesByEnd[end]++
+	}
+	for end, totals := range totalsByEnd {
+		if filesByEnd[end] >= minTailGapEvidence && len(totals) > 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// segmentRun returns the highest segment number and whether the numbers run
+// 1..highest with nothing missing.
+func segmentRun(segs nzbparser.NzbSegments) (int, bool) {
+	seen := make(map[int]struct{}, len(segs))
+	end := 0
+	for _, s := range segs {
+		if s.Number <= 0 {
+			return 0, false
+		}
+		seen[s.Number] = struct{}{}
+		end = max(end, s.Number)
+	}
+	return end, end > 0 && len(seen) == end
+}
+
+func fillFileGaps(f *nzbparser.NzbFile, trustTotals bool) int {
 	if len(f.Segments) == 0 {
 		return 0
 	}
@@ -61,7 +112,7 @@ func fillFileGaps(f *nzbparser.NzbFile) int {
 		maxNumber = max(maxNumber, s.Number)
 	}
 	expected := maxNumber
-	if f.TotalSegments > expected {
+	if trustTotals && f.TotalSegments > expected {
 		expected = f.TotalSegments
 	}
 	missing := expected - len(present)
