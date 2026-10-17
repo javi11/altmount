@@ -586,15 +586,18 @@ export function QueuePage() {
 															? stats.total_queued +
 																stats.total_processing +
 																stats.total_completed +
-																stats.total_failed
+																stats.total_failed +
+																stats.total_waiting_repair
 															: 0
 														: section.id === "pending"
 															? stats?.total_queued
 															: section.id === "processing"
 																? stats?.total_processing
-																: section.id === "completed"
-																	? stats?.total_completed
-																	: stats?.total_failed;
+																: section.id === "waiting_repair"
+																	? stats?.total_waiting_repair
+																	: section.id === "completed"
+																		? stats?.total_completed
+																		: stats?.total_failed;
 
 												return (
 													<li key={section.id}>

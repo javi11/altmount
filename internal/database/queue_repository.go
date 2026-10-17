@@ -656,7 +656,7 @@ func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error
 	const countsQuery = `
 		SELECT status, COUNT(*)
 		FROM import_queue
-		WHERE status IN ('pending', 'processing', 'completed', 'failed', 'paused')
+		WHERE status IN ('pending', 'processing', 'completed', 'failed', 'paused', 'waiting_repair')
 		GROUP BY status
 	`
 
@@ -685,6 +685,8 @@ func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error
 			stats.TotalCompleted = count
 		case "failed":
 			stats.TotalFailed = count
+		case "waiting_repair":
+			stats.TotalWaitingRepair = count
 		}
 	}
 	if err := rows.Err(); err != nil {
