@@ -1565,7 +1565,8 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
 
 	exists := true
-	if _, err := os.Stat(fullStoragePath); os.IsNotExist(err) {
+	fileInfo, err := os.Stat(fullStoragePath)
+	if os.IsNotExist(err) {
 		slog.DebugContext(context.Background(), "sabnzbd history: reported path does not exist on disk",
 			"item_id", item.ID,
 			"storage_path", *item.StoragePath,
@@ -1579,7 +1580,9 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 		return fullStoragePath, exists
 	}
 
-	if utils.HasPopularExtension(fullStoragePath) {
+	// Release directories can end in known extensions such as .h264 or .nzb.
+	// Only infer a file from its extension when it is not an existing directory.
+	if (err != nil || !fileInfo.IsDir()) && utils.HasPopularExtension(fullStoragePath) {
 		return filepath.Dir(fullStoragePath), exists
 	}
 
