@@ -339,7 +339,7 @@ func TestStremioCandidatesMatchStreamEntries(t *testing.T) {
 	cands := stremioCandidates(ordered, "tt1")
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt1", config.ProwlarrConfig{})
+		"https://host", "k", "movie", 0, 0, "tt1", config.ProwlarrConfig{}, resolveStreamDisplay(config.StremioConfig{}))
 
 	if len(cands) != len(entries) {
 		t.Fatalf("candidates (%d) and entries (%d) differ in length", len(cands), len(entries))

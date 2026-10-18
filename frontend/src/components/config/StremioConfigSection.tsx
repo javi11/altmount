@@ -11,6 +11,7 @@ import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { FilterExclusionsCard } from "./stremio/FilterExclusionsCard";
 import { IndexersConfigCard } from "./stremio/IndexersConfigCard";
 import { ReleaseScoreSandbox } from "./stremio/ReleaseScoreSandbox";
+import { StreamDisplayCard } from "./stremio/StreamDisplayCard";
 import { StreamRoutingCard } from "./stremio/StreamRoutingCard";
 import { StremioActionBar } from "./stremio/StremioActionBar";
 import { getDefaultScoringConfig, hydrateScoringFromProwlarr } from "./stremio/scoringPresets";
@@ -63,6 +64,7 @@ function initializeStremioFormData(config: ConfigResponse): StremioConfig {
 		base_url: stremio?.base_url ?? "",
 		direct_stream: stremio?.direct_stream ?? true,
 		show_cached_indicator: stremio?.show_cached_indicator ?? true,
+		display: stremio?.display ?? { preset: "default" },
 		fallback_timeout_ms: stremio?.fallback_timeout_ms ?? 3500,
 		max_retries: stremio?.max_retries ?? 2,
 		stream_ttl_seconds: stremio?.stream_ttl_seconds ?? 86400,
@@ -238,6 +240,9 @@ export function StremioConfigSection({
 
 			{/* 3. Stream Delivery & Playback Pipeline */}
 			<StreamRoutingCard config={formData} onChange={updateFormData} isReadOnly={isReadOnly} />
+
+			{/* 3b. How releases are labelled in Stremio */}
+			<StreamDisplayCard config={formData} onChange={updateFormData} isReadOnly={isReadOnly} />
 
 			{/* 4. TRaSH Custom Format Scoring & Quality Profiles */}
 			<TrashScoringCard

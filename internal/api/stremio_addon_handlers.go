@@ -240,15 +240,9 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 		return emptyStreamsResponse(c)
 	}
 
-	showCachedIndicator := cfg.Stremio.ShowCachedIndicator == nil || *cfg.Stremio.ShowCachedIndicator
 	entries := buildStremioStreamEntries(results, cachedItems, cfg.Stremio.NzbTTLHours, time.Now(),
 		baseURL, key, streamType, season, episode, imdbID, cfg.Stremio.Prowlarr,
-		s.storeStremioReleaseRef)
-	if !showCachedIndicator {
-		for i := range entries {
-			entries[i].Name = strings.TrimPrefix(entries[i].Name, "⚡ Cached · ")
-		}
-	}
+		resolveStreamDisplay(cfg.Stremio), s.storeStremioReleaseRef)
 
 	streams := make([]fiber.Map, 0, len(libraryStreams)+len(entries))
 	streams = append(streams, libraryStreams...)
@@ -273,6 +267,7 @@ func (s *Server) findHealthyLibraryStreams(ctx context.Context, cfg *config.Conf
 		return nil
 	}
 	selector := &stremioEpisodeSelector{Season: season, Episode: episode}
+	display := resolveStreamDisplay(cfg.Stremio)
 	var libraryStreams []fiber.Map
 	if streamType == "movie" {
 		tmdbID, movieTitle, movieYear, _ := resolveMovieMetadataFromIMDb(ctx, imdbID, cfg.GetUserAgent())
@@ -290,9 +285,10 @@ func (s *Server) findHealthyLibraryStreams(ctx context.Context, cfg *config.Conf
 					}
 					streamURL := baseURL + "/api/files/stream?path=" +
 						url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
+					name, title := s.libraryStreamLabels(display, h)
 					libraryStreams = append(libraryStreams, fiber.Map{
-						"name":  formatLibraryStreamName(h),
-						"title": formatLibraryStreamTitle(h),
+						"name":  name,
+						"title": title,
 						"url":   streamURL,
 					})
 				}
@@ -315,9 +311,10 @@ func (s *Server) findHealthyLibraryStreams(ctx context.Context, cfg *config.Conf
 						}
 						streamURL := baseURL + "/api/files/stream?path=" +
 							url.QueryEscape(h.FilePath) + "&download_key=" + url.QueryEscape(key)
+						name, title := s.libraryStreamLabels(display, h)
 						libraryStreams = append(libraryStreams, fiber.Map{
-							"name":  formatLibraryStreamName(h),
-							"title": formatLibraryStreamTitle(h),
+							"name":  name,
+							"title": title,
 							"url":   streamURL,
 						})
 					}
@@ -1046,6 +1043,7 @@ func buildStremioStreamEntries(
 	season, episode int,
 	fallbackID string,
 	prowlarrCfg config.ProwlarrConfig,
+	display streamDisplay,
 	releaseStores ...func(stremioPlayCandidate) (string, error),
 ) []stremioStreamEntry {
 	isCached := stremioCachedPredicate(cached, ttlHours, now)
@@ -1096,51 +1094,10 @@ func buildStremioStreamEntries(
 				"&episode=" + url.QueryEscape(strconv.Itoa(episode))
 		}
 
-		sizeGB := float64(r.Size) / 1e9
-		indexerLabel := r.Indexer
-		if indexerLabel == "" {
-			indexerLabel = "Unknown"
-		}
-
-		meta := prowlarr.InferReleaseMeta(r.Title)
-
-		// Badge: "AltMount 🇪🇸 4K"
-		badge := "AltMount"
-		if meta.FlagEmoji != "" {
-			badge += " " + meta.FlagEmoji
-		}
-		if meta.QualityLabel != "" {
-			badge += " " + meta.QualityLabel
-		}
-
-		// Content info: "La película (2024) [2160p][Esp]"
-		contentTitle := meta.ParsedTitle
-		if contentTitle == "" {
-			contentTitle = r.Title
-		}
-		if meta.Year > 0 {
-			contentTitle += fmt.Sprintf(" (%d)", meta.Year)
-		}
-		if meta.Resolution != "" {
-			contentTitle += " [" + meta.Resolution + "]"
-		}
-		if meta.LangCode != "" {
-			contentTitle += "[" + meta.LangCode + "]"
-		}
-
-		streamName := badge
-		if contentTitle != "" {
-			streamName += " - " + contentTitle
-		}
-		if cachedHit {
-			// Prefix marks instantly-playable releases, aiostreams-style.
-			streamName = "⚡ Cached · " + streamName
-		}
-
-		metaLine := fmt.Sprintf("💾 %.2f GB 🌐 %s", sizeGB, indexerLabel)
+		name, description := formatStremioStream(display, r, cachedHit)
 		entries = append(entries, stremioStreamEntry{
-			Name:   streamName,
-			Title:  fmt.Sprintf("%s\n%s", r.Title, metaLine),
+			Name:   name,
+			Title:  description,
 			URL:    playURL,
 			Cached: cachedHit,
 		})
