@@ -398,8 +398,9 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 			rootPath = cfg.MountPath
 		}
 
-		if rootPath != "" {
-			utils.RemoveEmptyDirs(rootPath, filepath.Dir(physicalPath))
+		cleanupDir := filepath.Dir(physicalPath)
+		if canCleanLibrary(rootPath, cleanupDir, cfg.MountPath) {
+			utils.RemoveEmptyDirs(rootPath, cleanupDir)
 		}
 	}
 
