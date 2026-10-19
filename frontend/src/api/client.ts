@@ -41,6 +41,8 @@ import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
+	EvaluateReleaseRequest,
+	EvaluateReleaseResponse,
 	InspectSearchRequest,
 	InspectSearchResponse,
 	PipelineTuneResponse,
@@ -1143,6 +1145,13 @@ class APIClient {
 		return this.request<StremioDisplayPreview[]>("/stremio/display/preview", {
 			method: "POST",
 			body: JSON.stringify({ display, show_cached_indicator: showCachedIndicator }),
+		});
+	}
+
+	async evaluateStremioRelease(payload: EvaluateReleaseRequest): Promise<EvaluateReleaseResponse> {
+		return this.request<EvaluateReleaseResponse>("/stremio/scoring/evaluate", {
+			method: "POST",
+			body: JSON.stringify(payload),
 		});
 	}
 

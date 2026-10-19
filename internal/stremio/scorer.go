@@ -2,6 +2,7 @@ package stremio
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -85,6 +86,8 @@ type ScoredRelease struct {
 	MatchedLanguages []string `json:"matched_languages"`
 	Excluded         bool     `json:"excluded"`
 	ExcludeReason    string   `json:"exclude_reason,omitempty"`
+	// LanguageBonus is the part of Score earned by a preferred language.
+	LanguageBonus int `json:"language_bonus,omitempty"`
 }
 
 var (
@@ -102,6 +105,11 @@ var (
 		"Original Audio": {"original", "dual", "multi", "multisubs"},
 	}
 )
+
+// OriginalAudio is the language label for a release with the film's own
+// audio. A release naming no language counts as one: release names tag dubs,
+// not the original audio.
+const OriginalAudio = "Original Audio"
 
 func getCompiledRegex(pattern string) (*regexp.Regexp, error) {
 	return regexcache.Get(pattern)
@@ -163,6 +171,9 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 			res.MatchedLanguages = append(res.MatchedLanguages, lang)
 		}
 	}
+	if !slices.Contains(res.MatchedLanguages, OriginalAudio) && prowlarr.CarriesOriginalAudio(title) {
+		res.MatchedLanguages = append(res.MatchedLanguages, OriginalAudio)
+	}
 
 	// If preferred language is strictly required
 	if cfg.RequirePreferredLanguage && len(cfg.PreferredLanguages) > 0 {
@@ -195,6 +206,7 @@ func EvaluateRelease(title string, cfg *StreamScoringConfig) ScoredRelease {
 			if strings.EqualFold(preferred, detected) {
 				if bonus := cfg.languageBonusFor(rank); bonus > 0 {
 					score += bonus
+					res.LanguageBonus = bonus
 				}
 				matchedPreferred = true
 				break
@@ -252,6 +264,27 @@ func applyIndexerBonus(eval *ScoredRelease, rel SearchResult, indexerWeights map
 		eval.Score += bonus
 	} else if bonus, ok := indexerWeights[rel.IndexerID]; ok && bonus != 0 {
 		eval.Score += bonus
+	}
+}
+
+// preferredIndexerBonus lifts a preferred indexer's releases above any score
+// the format rules can produce.
+const preferredIndexerBonus = 10000
+
+// applyPreferredIndexerBonus adds preferredIndexerBonus when the release came
+// from a preferred indexer, matched by exact id or by name (case-insensitive
+// substring, as the legacy Prowlarr setting did).
+func applyPreferredIndexerBonus(eval *ScoredRelease, rel SearchResult, preferred []string) {
+	indexer := strings.ToLower(rel.Indexer)
+	for _, p := range preferred {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p == rel.IndexerID || (indexer != "" && strings.Contains(indexer, strings.ToLower(p))) {
+			eval.Score += preferredIndexerBonus
+			return
+		}
 	}
 }
 

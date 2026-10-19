@@ -245,3 +245,22 @@ func TestInferReleaseMetaNormalTitle(t *testing.T) {
 	require.Equal(t, "AAC", meta.Audio)
 	require.Equal(t, "Japanese", meta.Language)
 }
+
+func TestCarriesOriginalAudio(t *testing.T) {
+	tests := []struct {
+		title string
+		want  bool
+	}{
+		{"Knight.and.Day.2010.1080p.WEB-DL.DDP5.1.H.264-GRP", true},
+		{"Knight.and.Day.2010.MULTi.1080p.WEB.H265-GRP", true},
+		{"Some.Film.2020.DUAL.AUDIO.1080p.BluRay-GRP", true},
+		{"Avengers.Endgame.2019.1080p.BluRay.x264-GRP", true},
+		{"Knight.and.Day.2010.GERMAN.1080p.BluRay.x264-GRP", false},
+		{"Knight and Day 2010.English.480p.R5.AAC-NoGroup", false},
+	}
+	for _, tt := range tests {
+		if got := CarriesOriginalAudio(tt.title); got != tt.want {
+			t.Errorf("CarriesOriginalAudio(%q) = %v, want %v", tt.title, got, tt.want)
+		}
+	}
+}

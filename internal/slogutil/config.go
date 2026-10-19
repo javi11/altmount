@@ -98,7 +98,8 @@ func SetupLogRotation(logConfig config.LogConfig) (*slog.Logger, *DynamicLeveler
 	dynamicLeveler.SetLevel(parseLevel(level).Level())
 
 	opts := &slog.HandlerOptions{
-		Level: dynamicLeveler,
+		Level:       dynamicLeveler,
+		ReplaceAttr: redactAttr,
 	}
 
 	// Text handler for human-readable stdout, JSON handler for machine-readable file.
