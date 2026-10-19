@@ -13,7 +13,7 @@ import (
 )
 
 func timePtr(t time.Time) *time.Time { return &t }
-func boolPtr(b bool) *bool             { return &b }
+func boolPtr(b bool) *bool           { return &b }
 
 // cachedItem builds a completed Stremio queue item for cache-lookup tests.
 func cachedItem(nzbPath, storagePath string, completedAt *time.Time) *database.ImportQueueItem {
@@ -123,7 +123,7 @@ func TestBuildStremioStreamEntries_CacheDetection(t *testing.T) {
 			results := []prowlarr.NZBResult{{Title: sTitle, DownloadURL: "https://prowlarr/dl/1", Size: 1_500_000_000, Indexer: "IdxA"}}
 
 			entries := buildStremioStreamEntries(results, tt.cached, tt.ttlHours, now,
-				"https://host", "thekey", "movie", 0, 0, "tt123")
+				"https://host", "thekey", "movie", 0, 0, "tt123", resolveStreamDisplay(config.StremioConfig{}))
 
 			if len(entries) != 1 {
 				t.Fatalf("expected 1 entry, got %d", len(entries))
@@ -164,7 +164,7 @@ func TestBuildStremioStreamEntries_CachedSortedFirstStable(t *testing.T) {
 	}
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt123")
+		"https://host", "k", "movie", 0, 0, "tt123", resolveStreamDisplay(config.StremioConfig{}))
 
 	if len(entries) != 4 {
 		t.Fatalf("expected 4 entries, got %d", len(entries))
@@ -210,4 +210,3 @@ func TestFindHealthyLibraryStreams_Disabled(t *testing.T) {
 	streams := s.findHealthyLibraryStreams(context.Background(), cfg, "series", "tt123", "http://host", "key", 1, 1)
 	assert.Nil(t, streams)
 }
-

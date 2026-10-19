@@ -1,4 +1,4 @@
-import { Database, Eye, Globe, Radio, Rocket, ShieldCheck, Zap } from "lucide-react";
+import { Database, Globe, Radio, Rocket, ShieldCheck, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { StremioConfig } from "../../../types/config";
 
@@ -14,7 +14,6 @@ export function StreamRoutingCard({
 	isReadOnly = false,
 }: StreamRoutingCardProps) {
 	const directStream = config.direct_stream ?? true;
-	const showCached = config.show_cached_indicator ?? true;
 	const reuseLibrary = config.include_library_streams ?? true;
 	const fallbackTimeout = config.fallback_timeout_ms ?? 3500;
 	const nzbTtlHours = config.nzb_ttl_hours ?? 24;
@@ -49,7 +48,7 @@ export function StreamRoutingCard({
 						Stream Delivery & Playback Pipeline
 					</h3>
 					<p className="text-base-content/60 text-xs">
-						Configure stream routing, reverse proxy endpoints, timeouts, and Stremio title badges
+						Configure stream routing, reverse proxy endpoints, timeouts and fallbacks
 					</p>
 				</div>
 			</div>
@@ -103,25 +102,6 @@ export function StreamRoutingCard({
 					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
 						<div className="min-w-0 flex-1">
 							<div className="flex items-center gap-2">
-								<Zap className="h-4 w-4 text-warning" />
-								<span className="font-semibold text-sm">Speed Badges</span>
-							</div>
-							<p className="mt-1 text-base-content/60 text-xs">
-								Appends custom release tags (⚡ Cached / Direct) in Stremio's stream selector list.
-							</p>
-						</div>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary shrink-0"
-							checked={showCached}
-							disabled={isReadOnly}
-							onChange={(e) => onChange({ show_cached_indicator: e.target.checked })}
-						/>
-					</div>
-
-					<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-						<div className="min-w-0 flex-1">
-							<div className="flex items-center gap-2">
 								<Database className="h-4 w-4 text-secondary" />
 								<span className="font-semibold text-sm">Reuse Library Releases</span>
 							</div>
@@ -140,52 +120,6 @@ export function StreamRoutingCard({
 							disabled={isReadOnly}
 							onChange={(e) => onChange({ include_library_streams: e.target.checked })}
 						/>
-					</div>
-				</div>
-
-				{/* Visual Search Result Preview Box */}
-				<div className="space-y-2">
-					<div className="flex items-center justify-between">
-						<span className="flex items-center gap-1.5 font-semibold text-base-content/70 text-xs uppercase tracking-wider">
-							<Eye className="h-3.5 w-3.5 text-primary" />
-							Visual Search Result Preview
-						</span>
-						<span className="badge badge-ghost badge-xs">Live Stremio Mock</span>
-					</div>
-
-					<div className="overflow-hidden rounded-2xl border border-primary/30 bg-neutral/90 p-4 text-neutral-content shadow-inner">
-						<div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-							<span className="inline-flex items-center gap-1 rounded bg-primary/20 px-2 py-0.5 font-bold text-primary">
-								<Zap className="h-3 w-3" />
-								Altmount
-							</span>
-							{showCached && (
-								<span className="rounded bg-success/20 px-1.5 py-0.5 font-semibold text-[11px] text-success">
-									[⚡ Cached]
-								</span>
-							)}
-							<span className="rounded bg-base-content/10 px-1.5 py-0.5 text-[11px] text-base-content/90">
-								{directStream ? "[Direct]" : "[Proxied]"}
-							</span>
-							<span className="rounded bg-info/20 px-1.5 py-0.5 font-semibold text-[11px] text-info">
-								[4K Remux]
-							</span>
-							<span className="rounded bg-secondary/20 px-1.5 py-0.5 font-semibold text-[11px] text-secondary">
-								[HDR10+]
-							</span>
-							<span className="rounded bg-accent/20 px-1.5 py-0.5 font-semibold text-[11px] text-accent">
-								[TrueHD Atmos]
-							</span>
-						</div>
-						<div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-neutral-content/70">
-							<span>Stream 1</span>
-							<span>•</span>
-							<span>NZB Usenet Engine</span>
-							<span>•</span>
-							<span>45.2 GB</span>
-							<span>•</span>
-							<span className="font-semibold text-success">+1,050 pts</span>
-						</div>
 					</div>
 				</div>
 

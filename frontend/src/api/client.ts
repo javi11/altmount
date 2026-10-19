@@ -53,6 +53,9 @@ import type {
 	ProviderTestRequest,
 	ProviderTestResponse,
 	ProviderUpdateRequest,
+	StremioDisplayConfig,
+	StremioDisplayPresetsResponse,
+	StremioDisplayPreview,
 } from "../types/config";
 
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
@@ -1131,6 +1134,20 @@ class APIClient {
 	}
 
 	// Stremio Search & Ranking Inspector
+	async getStremioDisplayPresets(): Promise<StremioDisplayPresetsResponse> {
+		return this.request<StremioDisplayPresetsResponse>("/stremio/display/presets");
+	}
+
+	async previewStremioDisplay(
+		display: StremioDisplayConfig,
+		showCachedIndicator?: boolean,
+	): Promise<StremioDisplayPreview[]> {
+		return this.request<StremioDisplayPreview[]>("/stremio/display/preview", {
+			method: "POST",
+			body: JSON.stringify({ display, show_cached_indicator: showCachedIndicator }),
+		});
+	}
+
 	async evaluateStremioRelease(payload: EvaluateReleaseRequest): Promise<EvaluateReleaseResponse> {
 		return this.request<EvaluateReleaseResponse>("/stremio/scoring/evaluate", {
 			method: "POST",

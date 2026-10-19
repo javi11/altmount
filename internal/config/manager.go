@@ -459,6 +459,8 @@ type StremioConfig struct {
 	// IncludeLibraryStreams when true checks and presents matching completed files
 	// from your Altmount library as instant 0s stream options in Stremio. Defaults to true.
 	IncludeLibraryStreams *bool `yaml:"include_library_streams" mapstructure:"include_library_streams" json:"include_library_streams,omitempty"`
+	// Display controls how releases are labelled in Stremio's stream list.
+	Display StremioDisplayConfig `yaml:"display" mapstructure:"display" json:"display"`
 	// FastFailHeaderOnly when true causes Stremio-originated imports to fail fast
 	// immediately on the release-level probe when missing articles are detected,
 	// skipping the multi-part RAR per-file Stat sweep. Defaults to true.
@@ -505,6 +507,16 @@ func (s StremioConfig) EffectiveIncludeLibraryStreams() bool {
 
 // EffectiveFastFailHeaderOnly reports whether Stremio imports should fast-fail
 // immediately on the release probe when missing articles are found. Defaults to true.
+// StremioDisplayConfig controls how releases are labelled in Stremio's
+// stream list: the stream's name (the left-hand label) and its description.
+type StremioDisplayConfig struct {
+	// Preset is "default", "full", "minimal" or "custom". Empty means default.
+	Preset string `yaml:"preset" mapstructure:"preset" json:"preset,omitempty"`
+	// NameTemplate and DescriptionTemplate are used when Preset is "custom".
+	NameTemplate        string `yaml:"name_template" mapstructure:"name_template" json:"name_template,omitempty"`
+	DescriptionTemplate string `yaml:"description_template" mapstructure:"description_template" json:"description_template,omitempty"`
+}
+
 func (s StremioConfig) EffectiveFastFailHeaderOnly() bool {
 	if s.FastFailHeaderOnly == nil {
 		return true

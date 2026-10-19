@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/database"
 	"github.com/kipsilabs/altmount/internal/prowlarr"
 )
@@ -338,7 +339,7 @@ func TestStremioCandidatesMatchStreamEntries(t *testing.T) {
 	cands := stremioCandidates(ordered, "tt1")
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt1")
+		"https://host", "k", "movie", 0, 0, "tt1", resolveStreamDisplay(config.StremioConfig{}))
 
 	if len(cands) != len(entries) {
 		t.Fatalf("candidates (%d) and entries (%d) differ in length", len(cands), len(entries))
@@ -370,7 +371,7 @@ func TestBuildStremioStreamEntriesKeepsScoredOrder(t *testing.T) {
 		"Knight and Day 2010.English.480p.R5.AAC-NoGroup",
 	)
 
-	entries := buildStremioStreamEntries(results, nil, 24, now, "https://host", "k", "movie", 0, 0, "tt1")
+	entries := buildStremioStreamEntries(results, nil, 24, now, "https://host", "k", "movie", 0, 0, "tt1", resolveStreamDisplay(config.StremioConfig{}))
 	cands := stremioCandidates(results, "tt1")
 	if len(entries) != len(cands) {
 		t.Fatalf("entries (%d) and candidates (%d) differ", len(entries), len(cands))

@@ -108,7 +108,7 @@ func TestPickStremioCandidate(t *testing.T) {
 func TestStremioPlayLinksCarryReleaseName(t *testing.T) {
 	results := []prowlarr.NZBResult{{Title: "Film.2008.1080p.WEB-DL-GRP", DownloadURL: "https://indexer/dl?apikey=secret", Indexer: "Idx"}}
 	entries := buildStremioStreamEntries(results, nil, 24, time.Now(), "https://host", "k", "movie", 0, 0, "tt1",
-		config.ProwlarrConfig{}, func(stremioPlayCandidate) (string, error) { return "tok", nil })
+		resolveStreamDisplay(config.StremioConfig{}), func(stremioPlayCandidate) (string, error) { return "tok", nil })
 	require.Len(t, entries, 1)
 	u, err := url.Parse(entries[0].URL)
 	require.NoError(t, err)

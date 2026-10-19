@@ -280,6 +280,8 @@ type StremioAPIResponse struct {
 	Indexers              StremioIndexersAPIResponse `json:"indexers"`
 	Scoring               StreamScoringAPIResponse   `json:"scoring"`
 	Prowlarr              ProwlarrAPIResponse        `json:"prowlarr"`
+	// Display controls how releases are labelled in Stremio.
+	Display config.StremioDisplayConfig `json:"display"`
 }
 
 // ProwlarrAPIResponse sanitizes Prowlarr config for API responses
@@ -531,6 +533,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FastFailHeaderOnly:    cfg.Stremio.EffectiveFastFailHeaderOnly(),
 		SkipRepair:            cfg.Stremio.EffectiveSkipRepair(),
 		IncludeLibraryStreams: cfg.Stremio.IncludeLibraryStreams,
+		Display:               cfg.Stremio.Display,
 		BaseURL:               cfg.Stremio.BaseURL,
 		Indexers: StremioIndexersAPIResponse{
 			Provider:        provider,
