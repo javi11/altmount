@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/database"
 	"github.com/kipsilabs/altmount/internal/prowlarr"
 )
@@ -221,7 +220,7 @@ func TestStremioFailedPredicate(t *testing.T) {
 	}
 }
 
-func TestOrderStremioResults_CachedFirstStable(t *testing.T) {
+func TestCachedFirstStable(t *testing.T) {
 	results := resultsFromTitles("Alpha 2024", "Bravo 2024", "Charlie 2024", "Delta 2024")
 	cachedKeys := map[string]struct{}{
 		sanitizeFilename("Bravo 2024"): {},
@@ -232,7 +231,7 @@ func TestOrderStremioResults_CachedFirstStable(t *testing.T) {
 		return ok
 	}
 
-	got := titlesOf(orderStremioResults(results, isCached, config.ProwlarrConfig{}))
+	got := titlesOf(cachedFirst(results, isCached))
 	want := []string{"Bravo 2024", "Delta 2024", "Alpha 2024", "Charlie 2024"}
 	if !equalStrings(got, want) {
 		t.Errorf("got %v; want %v", got, want)
@@ -335,11 +334,11 @@ func TestStremioCandidatesMatchStreamEntries(t *testing.T) {
 	}
 
 	isCached := stremioCachedPredicate(cached, 24, now)
-	ordered := orderStremioResults(results, isCached, config.ProwlarrConfig{})
+	ordered := cachedFirst(results, isCached)
 	cands := stremioCandidates(ordered, "tt1")
 
 	entries := buildStremioStreamEntries(results, cached, 24, now,
-		"https://host", "k", "movie", 0, 0, "tt1", config.ProwlarrConfig{})
+		"https://host", "k", "movie", 0, 0, "tt1")
 
 	if len(cands) != len(entries) {
 		t.Fatalf("candidates (%d) and entries (%d) differ in length", len(cands), len(entries))
@@ -358,41 +357,27 @@ func TestStremioCandidatesMatchStreamEntries(t *testing.T) {
 	}
 }
 
-func TestOrderStremioResults_CustomScoresAndExcludes(t *testing.T) {
+// The stream list keeps the scorer's order: building entries must not
+// re-rank uncached releases (it used to, with a separate score the config
+// page's testing view never showed), so the list, the play fallback chain
+// and the testing view all agree.
+func TestBuildStremioStreamEntriesKeepsScoredOrder(t *testing.T) {
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	// Scorer order: the 1080p WEB-DL first, the English-tagged 480p R5 last.
 	results := resultsFromTitles(
-		"Movie.2024.1080p.WEB-DL.DV",
-		"Movie.2024.2160p.UHD.REMUX",
-		"Movie.2024.1080p.WEB-DL",
-		"Movie.2024.CAM",
+		"Knight.And.Day.2010.1080p.DSNP.WEB-DL.DDP5.1.H.264-GRP",
+		"Knight.and.Day.2010.720p.BluRay.x264-GRP",
+		"Knight and Day 2010.English.480p.R5.AAC-NoGroup",
 	)
 
-	prowlarrCfg := config.ProwlarrConfig{
-		ExcludeKeywords: []string{"CAM"},
-		CustomScores: map[string]int{
-			"REMUX": 500,
-			"1080p": 200,
-			"DV":    -1000,
-		},
+	entries := buildStremioStreamEntries(results, nil, 24, now, "https://host", "k", "movie", 0, 0, "tt1")
+	cands := stremioCandidates(results, "tt1")
+	if len(entries) != len(cands) {
+		t.Fatalf("entries (%d) and candidates (%d) differ", len(entries), len(cands))
 	}
-
-	filtered := filterStremioResults(results, nil, nil, prowlarrCfg.ExcludeKeywords, nil)
-	if len(filtered) != 3 {
-		t.Fatalf("expected 3 results after excluding CAM, got %d", len(filtered))
-	}
-
-	ordered := orderStremioResults(filtered, func(string) bool { return false }, prowlarrCfg)
-	titles := titlesOf(ordered)
-
-	// Expected rank:
-	// 1. Movie.2024.2160p.UHD.REMUX (REMUX score +500)
-	// 2. Movie.2024.1080p.WEB-DL (1080p score +200)
-	// 3. Movie.2024.1080p.WEB-DL.DV (1080p +200, DV -1000 = -800)
-	want := []string{
-		"Movie.2024.2160p.UHD.REMUX",
-		"Movie.2024.1080p.WEB-DL",
-		"Movie.2024.1080p.WEB-DL.DV",
-	}
-	if !equalStrings(titles, want) {
-		t.Errorf("got %v; want %v", titles, want)
+	for i := range cands {
+		if !contains(entries[i].URL, "title="+urlEscape(cands[i].SafeTitle)) {
+			t.Errorf("position %d: entry %q, want %q", i, entries[i].URL, cands[i].SafeTitle)
+		}
 	}
 }

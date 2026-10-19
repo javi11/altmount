@@ -37,6 +37,9 @@ type CoordinatorConfig struct {
 	ProwlarrIdxs    []int                   `yaml:"prowlarr_indexers" mapstructure:"prowlarr_indexers" json:"prowlarr_indexers"`
 	NewsnabIndexers []newsnab.IndexerConfig `yaml:"newsnab_indexers" mapstructure:"newsnab_indexers" json:"newsnab_indexers"`
 	Scoring         StreamScoringConfig     `yaml:"scoring" mapstructure:"scoring" json:"scoring"`
+	// PreferredIndexers are indexer ids or names (legacy Prowlarr settings)
+	// whose releases rank ahead of every other indexer's.
+	PreferredIndexers []string `yaml:"preferred_indexers" mapstructure:"preferred_indexers" json:"preferred_indexers,omitempty"`
 }
 
 // SearchCoordinator coordinates multi-provider indexer searches and ranking.
@@ -397,6 +400,7 @@ func (sc *SearchCoordinator) SearchInspect(ctx context.Context, params SearchPar
 			discardedList = append(discardedList, eval)
 		} else {
 			applyIndexerBonus(&eval, rel, indexerWeights)
+			applyPreferredIndexerBonus(&eval, rel, sc.config.PreferredIndexers)
 			activeList = append(activeList, eval)
 		}
 	}

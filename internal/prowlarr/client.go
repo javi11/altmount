@@ -276,6 +276,17 @@ func InferLanguage(title string) string {
 	return ""
 }
 
+// CarriesOriginalAudio reports whether a release has the film's own audio:
+// it names no language (release names tag dubs, not the original audio), or
+// it is a multi/dual-audio release.
+func CarriesOriginalAudio(title string) bool {
+	switch InferLanguage(title) {
+	case "", "Multi", "Dual Audio", "Dual":
+		return true
+	}
+	return false
+}
+
 // ReleaseMeta holds inferred metadata from a release title.
 type ReleaseMeta struct {
 	Language     string // "Spanish", "French", etc.

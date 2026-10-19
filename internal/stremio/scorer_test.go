@@ -135,3 +135,68 @@ func TestRankAndFilterReleases(t *testing.T) {
 	assert.Equal(t, "Movie.2024.1080p.WEB-DL-GROUP", ranked[1].Title)
 	assert.Equal(t, 200, ranked[1].Score)
 }
+
+// A release naming no language is the film's own audio, so it matches an
+// "Original Audio" preference; a tagged dub does not.
+func TestEvaluateRelease_UntaggedIsOriginalAudio(t *testing.T) {
+	cfg := &StreamScoringConfig{PreferredLanguages: []string{"Original Audio"}}
+
+	untagged := EvaluateRelease("Knight.and.Day.2010.1080p.WEB-DL.DDP5.1.H.264-GRP", cfg)
+	assert.Equal(t, []string{OriginalAudio}, untagged.MatchedLanguages)
+	assert.Equal(t, defaultLanguageBonus, untagged.Score)
+
+	dub := EvaluateRelease("Knight.and.Day.2010.GERMAN.1080p.BluRay.x264-GRP", cfg)
+	assert.NotContains(t, dub.MatchedLanguages, OriginalAudio)
+	assert.Equal(t, 0, dub.Score)
+}
+
+// With English and Original Audio preferred, the one release that spells out
+// "English" (a 480p R5) must not outrank better untagged releases: untagged
+// counts as Original Audio, and quality decides.
+func TestRankAndFilterReleases_UntaggedEnglishFilmRanksByQuality(t *testing.T) {
+	cfg := &StreamScoringConfig{
+		PreferredLanguages: []string{"English", "Original Audio"},
+		CustomFormats: []TrashCustomFormat{
+			{ID: "lowres", Name: "Low Resolution", Pattern: `\b(720|480|576)[pi]\b`, Score: -200, Enabled: true},
+			{ID: "webdl", Name: "1080p WEB-DL", Pattern: `\b1080p\b.*\b(web[ ._-]?dl|webrip)\b`, Score: 120, Enabled: true},
+		},
+	}
+	releases := []SearchResult{
+		{Title: "Knight and Day 2010.English.480p.R5.AAC-NoGroup"},
+		{Title: "Knight.and.Day.2010.GERMAN.1080p.BluRay.x264-GRP"},
+		{Title: "Knight.And.Day.2010.1080p.DSNP.WEB-DL.DDP5.1.H.264-GRP"},
+	}
+
+	ranked := RankAndFilterReleases(releases, cfg, nil)
+	titles := make([]string, len(ranked))
+	for i, r := range ranked {
+		titles[i] = r.Title
+	}
+	assert.Equal(t, []string{
+		"Knight.And.Day.2010.1080p.DSNP.WEB-DL.DDP5.1.H.264-GRP",
+		"Knight and Day 2010.English.480p.R5.AAC-NoGroup",
+		"Knight.and.Day.2010.GERMAN.1080p.BluRay.x264-GRP",
+	}, titles)
+	assert.Equal(t, 450, ranked[0].LanguageBonus, "untagged earns the Original Audio bonus")
+}
+
+func TestApplyPreferredIndexerBonus(t *testing.T) {
+	tests := []struct {
+		name      string
+		rel       SearchResult
+		preferred []string
+		want      int
+	}{
+		{"by id", SearchResult{Indexer: "Alpha", IndexerID: "7"}, []string{"7"}, preferredIndexerBonus},
+		{"by name, case-insensitive", SearchResult{Indexer: "NZB Alpha (Prowlarr)"}, []string{"alpha"}, preferredIndexerBonus},
+		{"not preferred", SearchResult{Indexer: "Bravo", IndexerID: "8"}, []string{"7", "alpha"}, 0},
+		{"none configured", SearchResult{Indexer: "Alpha"}, nil, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := ScoredRelease{}
+			applyPreferredIndexerBonus(&eval, tt.rel, tt.preferred)
+			assert.Equal(t, tt.want, eval.Score)
+		})
+	}
+}
