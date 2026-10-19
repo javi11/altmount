@@ -408,20 +408,45 @@ func (s *Server) storeStremioReleaseRef(candidate stremioPlayCandidate) (string,
 			delete(s.stremioReleaseRefs, key)
 		}
 	}
-	s.stremioReleaseRefs[token] = stremioReleaseRef{Candidate: candidate, ExpiresAt: now.Add(15 * time.Minute)}
+	s.stremioReleaseRefs[token] = stremioReleaseRef{Candidate: candidate, ExpiresAt: now.Add(s.stremioReleaseLifetime())}
 	return token, nil
 }
 
+// minStremioReleaseLifetime keeps play links usable through a film even when
+// stream_ttl_seconds is set very low.
+const minStremioReleaseLifetime = time.Hour
+
+// stremioReleaseLifetime is how long a play link's release token stays valid:
+// as long as Stremio may keep showing the stream list it came from
+// (stream_ttl_seconds, default 24h). Players re-request the play link when
+// they seek or reconnect, so a short lifetime broke rewinding mid-film.
+func (s *Server) stremioReleaseLifetime() time.Duration {
+	lifetime := 24 * time.Hour
+	if s.configManager != nil {
+		if ttl := s.configManager.GetConfig().Stremio.StreamTTLSeconds; ttl > 0 {
+			lifetime = time.Duration(ttl) * time.Second
+		}
+	}
+	return max(lifetime, minStremioReleaseLifetime)
+}
+
+// consumeStremioReleaseRef resolves a play link's release token. A token
+// that is used is kept alive for another full lifetime, so playback that
+// re-requests the link keeps working however long it runs.
 func (s *Server) consumeStremioReleaseRef(token string) (stremioPlayCandidate, bool) {
+	lifetime := s.stremioReleaseLifetime()
 	s.stremioReleaseMu.Lock()
 	defer s.stremioReleaseMu.Unlock()
 	ref, ok := s.stremioReleaseRefs[token]
-	if !ok || !ref.ExpiresAt.After(time.Now()) {
+	now := time.Now()
+	if !ok || !ref.ExpiresAt.After(now) {
 		if ok {
 			delete(s.stremioReleaseRefs, token)
 		}
 		return stremioPlayCandidate{}, false
 	}
+	ref.ExpiresAt = now.Add(lifetime)
+	s.stremioReleaseRefs[token] = ref
 	return ref.Candidate, true
 }
 
@@ -1076,7 +1101,9 @@ func buildStremioStreamEntries(
 
 		playURL := baseURL + "/stremio/" + key + "/play"
 		if releaseToken != "" {
-			playURL += "?release=" + url.QueryEscape(releaseToken)
+			// The release name is not secret (the token hides the indexer
+			// URL); it lets /play recover the release once the token expires.
+			playURL += "?release=" + url.QueryEscape(releaseToken) + "&title=" + url.QueryEscape(safeTitle)
 		} else {
 			playURL += "?url=" + url.QueryEscape(r.DownloadURL) + "&title=" + url.QueryEscape(safeTitle)
 		}
@@ -1190,12 +1217,24 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 	if releaseToken == "" {
 		return RespondBadRequest(c, "Missing release parameter", "")
 	}
-	cand, ok := s.consumeStremioReleaseRef(releaseToken)
-	if !ok {
-		return RespondBadRequest(c, "Invalid or expired release parameter", "")
-	}
 	imdbID := c.Query("id")
 	streamType := c.Query("type")
+	cand, ok := s.consumeStremioReleaseRef(releaseToken)
+	if !ok {
+		// Stremio saves the stream a title was played with and replays that
+		// link on resume, long after its release token expired. Recover from
+		// the content id (and the release name, when the link carries one)
+		// instead of failing: play an already-imported copy, or search again.
+		if imdbID == "" {
+			return RespondBadRequest(c, "Invalid or expired release parameter", "")
+		}
+		cand = stremioPlayCandidate{}
+		if title := c.Query("title"); title != "" {
+			cand.SafeTitle = sanitizeFilename(title)
+		}
+		slog.InfoContext(ctx, "Recovering Stremio play link with an expired release token",
+			"imdb_id", imdbID, "title", cand.SafeTitle)
+	}
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 	selector := stremioEpisodeSelectorFromRequest(c)
@@ -1252,14 +1291,68 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 		}
 	}
 
+	explicitRelease := true
+	if cand.DownloadURL == "" {
+		// A recovered link has no release to download: find it again.
+		found, matched := s.findStremioCandidate(ctx, cfg, streamType, imdbID, selector, cand.SafeTitle)
+		if found == nil {
+			return RespondServiceUnavailable(c, "No playable release found", "the play link expired and a new search found nothing")
+		}
+		cand, explicitRelease = *found, matched
+	}
+
 	return s.playStremioWithFallback(c, cfg, cand, playRequest{
 		baseURL:         baseURL,
 		key:             key,
 		streamType:      streamType,
 		imdbID:          imdbID,
 		selector:        selector,
-		explicitRelease: true,
+		explicitRelease: explicitRelease,
 	})
+}
+
+// findStremioCandidate searches again for a content id and returns the
+// release named safeTitle when the search still offers it (matched true),
+// otherwise the top-ranked release, or nil when the search finds nothing.
+func (s *Server) findStremioCandidate(
+	ctx context.Context,
+	cfg *config.Config,
+	streamType, imdbID string,
+	selector *stremioEpisodeSelector,
+	safeTitle string,
+) (cand *stremioPlayCandidate, matched bool) {
+	prowlarrType := "search"
+	switch streamType {
+	case "movie":
+		prowlarrType = "movie"
+	case "series":
+		prowlarrType = "tvsearch"
+	}
+	season, episode := 0, 0
+	if selector != nil {
+		season, episode = selector.Season, selector.Episode
+	}
+	results, _, err := s.searchStremioReleases(ctx, cfg, streamType, prowlarrType, imdbID, season, episode)
+	if err != nil {
+		slog.WarnContext(ctx, "Stremio search for an expired play link failed", "error", err, "imdb_id", imdbID)
+	}
+	return pickStremioCandidate(stremioCandidates(results, imdbID), safeTitle)
+}
+
+// pickStremioCandidate returns the candidate named safeTitle (matched true),
+// else the first, else nil.
+func pickStremioCandidate(cands []stremioPlayCandidate, safeTitle string) (*stremioPlayCandidate, bool) {
+	if safeTitle != "" {
+		for i := range cands {
+			if cands[i].SafeTitle == safeTitle {
+				return &cands[i], true
+			}
+		}
+	}
+	if len(cands) == 0 {
+		return nil, false
+	}
+	return &cands[0], false
 }
 
 // playRequest carries the per-request context the fallback loop needs, keeping the
