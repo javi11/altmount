@@ -15,6 +15,7 @@ export function StreamRoutingCard({
 }: StreamRoutingCardProps) {
 	const directStream = config.direct_stream ?? true;
 	const reuseLibrary = config.include_library_streams ?? true;
+	const skipSearchWhenCached = config.skip_search_when_cached ?? false;
 	const fallbackTimeout = config.fallback_timeout_ms ?? 3500;
 	const nzbTtlHours = config.nzb_ttl_hours ?? 24;
 	const failedTtlHours = config.failed_release_ttl_hours ?? 24;
@@ -121,6 +122,29 @@ export function StreamRoutingCard({
 							onChange={(e) => onChange({ include_library_streams: e.target.checked })}
 						/>
 					</div>
+				</div>
+
+				<div className="flex items-start justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+					<div className="min-w-0 flex-1">
+						<div className="flex items-center gap-2">
+							<Zap className="h-4 w-4 text-primary" />
+							<label htmlFor="stremio-skip-search-when-cached" className="font-semibold text-sm">
+								Skip Search When Cached
+							</label>
+						</div>
+						<p className="mt-1 text-base-content/60 text-xs">
+							Return matching cached streams without searching indexers. Searches normally when no
+							cached streams are available. Disabled by default.
+						</p>
+					</div>
+					<input
+						id="stremio-skip-search-when-cached"
+						type="checkbox"
+						className="toggle toggle-primary shrink-0"
+						checked={skipSearchWhenCached}
+						disabled={isReadOnly}
+						onChange={(e) => onChange({ skip_search_when_cached: e.target.checked })}
+					/>
 				</div>
 
 				{/* Timeouts & TTL Controls */}

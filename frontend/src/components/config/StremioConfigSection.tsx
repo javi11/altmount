@@ -74,6 +74,7 @@ function initializeStremioFormData(config: ConfigResponse): StremioConfig {
 		fast_fail_header_only: stremio?.fast_fail_header_only ?? true,
 		skip_repair: stremio?.skip_repair ?? false,
 		include_library_streams: stremio?.include_library_streams ?? true,
+		skip_search_when_cached: stremio?.skip_search_when_cached ?? false,
 		indexers,
 		scoring,
 		prowlarr: {

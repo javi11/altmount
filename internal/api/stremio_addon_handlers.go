@@ -222,6 +222,23 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 
 	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
 	libraryStreams := s.findHealthyLibraryStreams(ctx, cfg, streamType, imdbID, baseURL, key, season, episode)
+	if cfg.Stremio.SkipSearchWhenCached {
+		cachedStreams := s.findCachedStremioStreams(ctx, cfg, streamType, imdbID, baseURL, key, season, episode)
+		seen := make(map[string]bool, len(libraryStreams))
+		for _, stream := range libraryStreams {
+			streamURL, _ := stream["url"].(string)
+			seen[streamURL] = true
+		}
+		for _, stream := range cachedStreams {
+			if !seen[stream.URL] {
+				libraryStreams = append(libraryStreams, fiber.Map{"name": stream.Name, "title": stream.Title, "url": stream.URL})
+				seen[stream.URL] = true
+			}
+		}
+		if len(libraryStreams) > 0 {
+			return c.JSON(fiber.Map{"streams": libraryStreams})
+		}
+	}
 
 	// Map Stremio type to Prowlarr search type
 	prowlarrType := "search"
