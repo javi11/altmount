@@ -278,6 +278,7 @@ type StremioAPIResponse struct {
 	FastFailHeaderOnly    bool                       `json:"fast_fail_header_only"`
 	SkipRepair            bool                       `json:"skip_repair"`
 	IncludeLibraryStreams *bool                      `json:"include_library_streams,omitempty"`
+	SkipSearchWhenCached  bool                       `json:"skip_search_when_cached"`
 	BaseURL               string                     `json:"base_url,omitempty"`
 	Indexers              StremioIndexersAPIResponse `json:"indexers"`
 	Scoring               StreamScoringAPIResponse   `json:"scoring"`
@@ -535,6 +536,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FastFailHeaderOnly:    cfg.Stremio.EffectiveFastFailHeaderOnly(),
 		SkipRepair:            cfg.Stremio.EffectiveSkipRepair(),
 		IncludeLibraryStreams: cfg.Stremio.IncludeLibraryStreams,
+		SkipSearchWhenCached:  cfg.Stremio.SkipSearchWhenCached,
 		Display:               cfg.Stremio.Display,
 		BaseURL:               cfg.Stremio.BaseURL,
 		Indexers: StremioIndexersAPIResponse{

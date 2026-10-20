@@ -45,6 +45,7 @@ Add the following block to your `config.yaml`:
 stremio:
   enabled: true
   nzb_ttl_hours: 24   # 0 = keep cached streams forever
+  skip_search_when_cached: false # Skip indexer search when matching cached streams exist
   base_url: ""        # optional — set if auto-detection gives the wrong origin
   prowlarr:
     enabled: true
@@ -59,6 +60,7 @@ stremio:
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable the Stremio integration |
 | `nzb_ttl_hours` | int | `24` | Hours before a cached NZB result expires. `0` means never expire. |
+| `skip_search_when_cached` | bool | `false` | Return matching cached imports and healthy library streams without searching indexers. Searches normally when no cached streams match. Respects NZB cache expiry; library streams follow the Reuse Library Releases setting. |
 | `base_url` | string | `""` | Public base URL used when building stream and manifest links (e.g. `https://altmount.example.com`). When empty, AltMount auto-detects the origin from the incoming request. Set this when running behind a reverse proxy or when the detected origin is wrong. |
 
 When `nzb_ttl_hours` is greater than zero, submitting the same NZB filename within the TTL window returns the cached stream URLs immediately without re-queueing or re-downloading.

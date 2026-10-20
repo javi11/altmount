@@ -460,6 +460,9 @@ type StremioConfig struct {
 	// IncludeLibraryStreams when true checks and presents matching completed files
 	// from your Altmount library as instant 0s stream options in Stremio. Defaults to true.
 	IncludeLibraryStreams *bool `yaml:"include_library_streams" mapstructure:"include_library_streams" json:"include_library_streams,omitempty"`
+	// SkipSearchWhenCached returns matching cached streams without searching indexers.
+	// Defaults to false; a cache miss always falls back to the normal search.
+	SkipSearchWhenCached bool `yaml:"skip_search_when_cached" mapstructure:"skip_search_when_cached" json:"skip_search_when_cached"`
 	// Display controls how releases are labelled in Stremio's stream list.
 	Display StremioDisplayConfig `yaml:"display" mapstructure:"display" json:"display"`
 	// FastFailHeaderOnly when true causes Stremio-originated imports to fail fast
