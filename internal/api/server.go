@@ -72,8 +72,10 @@ type Server struct {
 	updater                 updater.Updater
 	ready                   atomic.Bool
 
-	speedtest     *speedtestCoordinator
-	speedtestOnce sync.Once
+	speedtest           *speedtestCoordinator
+	speedtestOnce       sync.Once
+	duplicateLookup     duplicateLookupService
+	duplicateLookupOnce sync.Once
 
 	// stremioPlayGroup coalesces concurrent Stremio plays of the same title (download once).
 	stremioPlayGroup singleflight.Group
@@ -226,6 +228,10 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 		AllowCredentials: true,
 	}))
 	api.Use(recover.New())
+
+	// This machine-to-machine endpoint authenticates its own API key, including
+	// when interactive login is disabled. Register before the JWT middleware.
+	api.Post("/files/duplicate-lookup", s.handleDuplicateLookup)
 
 	// Apply JWT authentication middleware globally except for public auth routes
 	// Only apply if login is required (default: true)

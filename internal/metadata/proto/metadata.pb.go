@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        v7.35.1
-// source: internal/metadata/proto/metadata.proto
+// source: metadata.proto
 
 package __
 
@@ -57,11 +57,11 @@ func (x Encryption) String() string {
 }
 
 func (Encryption) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_metadata_proto_metadata_proto_enumTypes[0].Descriptor()
+	return file_metadata_proto_enumTypes[0].Descriptor()
 }
 
 func (Encryption) Type() protoreflect.EnumType {
-	return &file_internal_metadata_proto_metadata_proto_enumTypes[0]
+	return &file_metadata_proto_enumTypes[0]
 }
 
 func (x Encryption) Number() protoreflect.EnumNumber {
@@ -70,7 +70,7 @@ func (x Encryption) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Encryption.Descriptor instead.
 func (Encryption) EnumDescriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{0}
+	return file_metadata_proto_rawDescGZIP(), []int{0}
 }
 
 // FileStatus represents the health status of a file
@@ -110,11 +110,11 @@ func (x FileStatus) String() string {
 }
 
 func (FileStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_metadata_proto_metadata_proto_enumTypes[1].Descriptor()
+	return file_metadata_proto_enumTypes[1].Descriptor()
 }
 
 func (FileStatus) Type() protoreflect.EnumType {
-	return &file_internal_metadata_proto_metadata_proto_enumTypes[1]
+	return &file_metadata_proto_enumTypes[1]
 }
 
 func (x FileStatus) Number() protoreflect.EnumNumber {
@@ -123,7 +123,7 @@ func (x FileStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FileStatus.Descriptor instead.
 func (FileStatus) EnumDescriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{1}
+	return file_metadata_proto_rawDescGZIP(), []int{1}
 }
 
 // SegmentData contains Usenet segment information with byte offsets
@@ -139,7 +139,7 @@ type SegmentData struct {
 
 func (x *SegmentData) Reset() {
 	*x = SegmentData{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[0]
+	mi := &file_metadata_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -151,7 +151,7 @@ func (x *SegmentData) String() string {
 func (*SegmentData) ProtoMessage() {}
 
 func (x *SegmentData) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[0]
+	mi := &file_metadata_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -164,7 +164,7 @@ func (x *SegmentData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentData.ProtoReflect.Descriptor instead.
 func (*SegmentData) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{0}
+	return file_metadata_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *SegmentData) GetSegmentSize() int64 {
@@ -209,7 +209,7 @@ type Par2FileReference struct {
 
 func (x *Par2FileReference) Reset() {
 	*x = Par2FileReference{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[1]
+	mi := &file_metadata_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -221,7 +221,7 @@ func (x *Par2FileReference) String() string {
 func (*Par2FileReference) ProtoMessage() {}
 
 func (x *Par2FileReference) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[1]
+	mi := &file_metadata_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -234,7 +234,7 @@ func (x *Par2FileReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Par2FileReference.ProtoReflect.Descriptor instead.
 func (*Par2FileReference) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{1}
+	return file_metadata_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Par2FileReference) GetFilename() string {
@@ -296,7 +296,7 @@ type NestedSegmentSource struct {
 
 func (x *NestedSegmentSource) Reset() {
 	*x = NestedSegmentSource{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[2]
+	mi := &file_metadata_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -308,7 +308,7 @@ func (x *NestedSegmentSource) String() string {
 func (*NestedSegmentSource) ProtoMessage() {}
 
 func (x *NestedSegmentSource) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[2]
+	mi := &file_metadata_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -321,7 +321,7 @@ func (x *NestedSegmentSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NestedSegmentSource.ProtoReflect.Descriptor instead.
 func (*NestedSegmentSource) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{2}
+	return file_metadata_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NestedSegmentSource) GetSegments() []*SegmentData {
@@ -395,7 +395,7 @@ type ClipBoundary struct {
 
 func (x *ClipBoundary) Reset() {
 	*x = ClipBoundary{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	mi := &file_metadata_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +407,7 @@ func (x *ClipBoundary) String() string {
 func (*ClipBoundary) ProtoMessage() {}
 
 func (x *ClipBoundary) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	mi := &file_metadata_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +420,7 @@ func (x *ClipBoundary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClipBoundary.ProtoReflect.Descriptor instead.
 func (*ClipBoundary) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{3}
+	return file_metadata_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ClipBoundary) GetByteLen() int64 {
@@ -452,7 +452,7 @@ type HoleRun struct {
 
 func (x *HoleRun) Reset() {
 	*x = HoleRun{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[4]
+	mi := &file_metadata_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -464,7 +464,7 @@ func (x *HoleRun) String() string {
 func (*HoleRun) ProtoMessage() {}
 
 func (x *HoleRun) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[4]
+	mi := &file_metadata_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -477,7 +477,7 @@ func (x *HoleRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HoleRun.ProtoReflect.Descriptor instead.
 func (*HoleRun) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{4}
+	return file_metadata_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *HoleRun) GetStartSegment() int64 {
@@ -541,6 +541,7 @@ type FileMetadata struct {
 	SegmentRefs             []*SegmentRef          `protobuf:"bytes,19,rep,name=segment_refs,json=segmentRefs,proto3" json:"segment_refs,omitempty"`                                       // v3 replacement for segment_data
 	SegmentRuns             []*SegmentRun          `protobuf:"bytes,20,rep,name=segment_runs,json=segmentRuns,proto3" json:"segment_runs,omitempty"`                                       // compact run encoding; preferred over segment_refs when present
 	KnownHoles              []*HoleRun             `protobuf:"bytes,21,rep,name=known_holes,json=knownHoles,proto3" json:"known_holes,omitempty"`                                          // segments confirmed missing on all providers (zero-filled during playback)
+	OriginalFilename        string                 `protobuf:"bytes,23,opt,name=original_filename,json=originalFilename,proto3" json:"original_filename,omitempty"`                        // Original posted filename before virtual path disambiguation.
 	HoleProviderFingerprint string                 `protobuf:"bytes,22,opt,name=hole_provider_fingerprint,json=holeProviderFingerprint,proto3" json:"hole_provider_fingerprint,omitempty"` // provider set known_holes were confirmed against; records under another set are re-probed
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
@@ -548,7 +549,7 @@ type FileMetadata struct {
 
 func (x *FileMetadata) Reset() {
 	*x = FileMetadata{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[5]
+	mi := &file_metadata_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -560,7 +561,7 @@ func (x *FileMetadata) String() string {
 func (*FileMetadata) ProtoMessage() {}
 
 func (x *FileMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[5]
+	mi := &file_metadata_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -573,7 +574,7 @@ func (x *FileMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileMetadata.ProtoReflect.Descriptor instead.
 func (*FileMetadata) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{5}
+	return file_metadata_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FileMetadata) GetFileSize() int64 {
@@ -723,6 +724,13 @@ func (x *FileMetadata) GetKnownHoles() []*HoleRun {
 	return nil
 }
 
+func (x *FileMetadata) GetOriginalFilename() string {
+	if x != nil {
+		return x.OriginalFilename
+	}
+	return ""
+}
+
 func (x *FileMetadata) GetHoleProviderFingerprint() string {
 	if x != nil {
 		return x.HoleProviderFingerprint
@@ -741,7 +749,7 @@ type NzbStore struct {
 
 func (x *NzbStore) Reset() {
 	*x = NzbStore{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[6]
+	mi := &file_metadata_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -753,7 +761,7 @@ func (x *NzbStore) String() string {
 func (*NzbStore) ProtoMessage() {}
 
 func (x *NzbStore) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[6]
+	mi := &file_metadata_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -766,7 +774,7 @@ func (x *NzbStore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NzbStore.ProtoReflect.Descriptor instead.
 func (*NzbStore) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{6}
+	return file_metadata_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *NzbStore) GetFiles() []*NzbFileEntry {
@@ -789,7 +797,7 @@ type NzbFileEntry struct {
 
 func (x *NzbFileEntry) Reset() {
 	*x = NzbFileEntry{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[7]
+	mi := &file_metadata_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -801,7 +809,7 @@ func (x *NzbFileEntry) String() string {
 func (*NzbFileEntry) ProtoMessage() {}
 
 func (x *NzbFileEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[7]
+	mi := &file_metadata_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -814,7 +822,7 @@ func (x *NzbFileEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NzbFileEntry.ProtoReflect.Descriptor instead.
 func (*NzbFileEntry) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{7}
+	return file_metadata_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *NzbFileEntry) GetSubject() string {
@@ -863,7 +871,7 @@ type NzbSeg struct {
 
 func (x *NzbSeg) Reset() {
 	*x = NzbSeg{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[8]
+	mi := &file_metadata_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -875,7 +883,7 @@ func (x *NzbSeg) String() string {
 func (*NzbSeg) ProtoMessage() {}
 
 func (x *NzbSeg) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[8]
+	mi := &file_metadata_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -888,7 +896,7 @@ func (x *NzbSeg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NzbSeg.ProtoReflect.Descriptor instead.
 func (*NzbSeg) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{8}
+	return file_metadata_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NzbSeg) GetId() string {
@@ -925,7 +933,7 @@ type SegmentRef struct {
 
 func (x *SegmentRef) Reset() {
 	*x = SegmentRef{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[9]
+	mi := &file_metadata_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +945,7 @@ func (x *SegmentRef) String() string {
 func (*SegmentRef) ProtoMessage() {}
 
 func (x *SegmentRef) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[9]
+	mi := &file_metadata_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +958,7 @@ func (x *SegmentRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentRef.ProtoReflect.Descriptor instead.
 func (*SegmentRef) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{9}
+	return file_metadata_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SegmentRef) GetStoreIndex() int64 {
@@ -996,7 +1004,7 @@ type SegmentRun struct {
 
 func (x *SegmentRun) Reset() {
 	*x = SegmentRun{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[10]
+	mi := &file_metadata_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1008,7 +1016,7 @@ func (x *SegmentRun) String() string {
 func (*SegmentRun) ProtoMessage() {}
 
 func (x *SegmentRun) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[10]
+	mi := &file_metadata_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1021,7 +1029,7 @@ func (x *SegmentRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentRun.ProtoReflect.Descriptor instead.
 func (*SegmentRun) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{10}
+	return file_metadata_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SegmentRun) GetBaseStoreIndex() int64 {
@@ -1045,11 +1053,11 @@ func (x *SegmentRun) GetDecodedBytes() int64 {
 	return 0
 }
 
-var File_internal_metadata_proto_metadata_proto protoreflect.FileDescriptor
+var File_metadata_proto protoreflect.FileDescriptor
 
-const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
+const file_metadata_proto_rawDesc = "" +
 	"\n" +
-	"&internal/metadata/proto/metadata.proto\x12\bmetadata\"\x82\x01\n" +
+	"\x0emetadata.proto\x12\bmetadata\"\x82\x01\n" +
 	"\vSegmentData\x12!\n" +
 	"\fsegment_size\x18\x01 \x01(\x03R\vsegmentSize\x12!\n" +
 	"\fstart_offset\x18\x03 \x01(\x03R\vstartOffset\x12\x1d\n" +
@@ -1078,7 +1086,7 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\rstart_segment\x18\x01 \x01(\x03R\fstartSegment\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\x12\x1f\n" +
 	"\vrecorded_at\x18\x03 \x01(\x03R\n" +
-	"recordedAt\"\xe4\a\n" +
+	"recordedAt\"\x91\b\n" +
 	"\fFileMetadata\x12\x1b\n" +
 	"\tfile_size\x18\x01 \x01(\x03R\bfileSize\x12&\n" +
 	"\x0fsource_nzb_path\x18\x02 \x01(\tR\rsourceNzbPath\x12,\n" +
@@ -1107,7 +1115,8 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\fsegment_refs\x18\x13 \x03(\v2\x14.metadata.SegmentRefR\vsegmentRefs\x127\n" +
 	"\fsegment_runs\x18\x14 \x03(\v2\x14.metadata.SegmentRunR\vsegmentRuns\x122\n" +
 	"\vknown_holes\x18\x15 \x03(\v2\x11.metadata.HoleRunR\n" +
-	"knownHoles\x12:\n" +
+	"knownHoles\x12+\n" +
+	"\x11original_filename\x18\x17 \x01(\tR\x10originalFilename\x12:\n" +
 	"\x19hole_provider_fingerprint\x18\x16 \x01(\tR\x17holeProviderFingerprint\"8\n" +
 	"\bNzbStore\x12,\n" +
 	"\x05files\x18\x01 \x03(\v2\x16.metadata.NzbFileEntryR\x05files\"\x9a\x01\n" +
@@ -1149,20 +1158,20 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\x14FILE_STATUS_DEGRADED\x10\x04B\x04Z\x02./b\x06proto3"
 
 var (
-	file_internal_metadata_proto_metadata_proto_rawDescOnce sync.Once
-	file_internal_metadata_proto_metadata_proto_rawDescData []byte
+	file_metadata_proto_rawDescOnce sync.Once
+	file_metadata_proto_rawDescData []byte
 )
 
-func file_internal_metadata_proto_metadata_proto_rawDescGZIP() []byte {
-	file_internal_metadata_proto_metadata_proto_rawDescOnce.Do(func() {
-		file_internal_metadata_proto_metadata_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_metadata_proto_metadata_proto_rawDesc), len(file_internal_metadata_proto_metadata_proto_rawDesc)))
+func file_metadata_proto_rawDescGZIP() []byte {
+	file_metadata_proto_rawDescOnce.Do(func() {
+		file_metadata_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_metadata_proto_rawDesc), len(file_metadata_proto_rawDesc)))
 	})
-	return file_internal_metadata_proto_metadata_proto_rawDescData
+	return file_metadata_proto_rawDescData
 }
 
-var file_internal_metadata_proto_metadata_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_internal_metadata_proto_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
-var file_internal_metadata_proto_metadata_proto_goTypes = []any{
+var file_metadata_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_metadata_proto_goTypes = []any{
 	(Encryption)(0),             // 0: metadata.Encryption
 	(FileStatus)(0),             // 1: metadata.FileStatus
 	(*SegmentData)(nil),         // 2: metadata.SegmentData
@@ -1177,7 +1186,7 @@ var file_internal_metadata_proto_metadata_proto_goTypes = []any{
 	(*SegmentRef)(nil),          // 11: metadata.SegmentRef
 	(*SegmentRun)(nil),          // 12: metadata.SegmentRun
 }
-var file_internal_metadata_proto_metadata_proto_depIdxs = []int32{
+var file_metadata_proto_depIdxs = []int32{
 	2,  // 0: metadata.Par2FileReference.segment_data:type_name -> metadata.SegmentData
 	11, // 1: metadata.Par2FileReference.segment_refs:type_name -> metadata.SegmentRef
 	12, // 2: metadata.Par2FileReference.segment_runs:type_name -> metadata.SegmentRun
@@ -1202,27 +1211,27 @@ var file_internal_metadata_proto_metadata_proto_depIdxs = []int32{
 	0,  // [0:17] is the sub-list for field type_name
 }
 
-func init() { file_internal_metadata_proto_metadata_proto_init() }
-func file_internal_metadata_proto_metadata_proto_init() {
-	if File_internal_metadata_proto_metadata_proto != nil {
+func init() { file_metadata_proto_init() }
+func file_metadata_proto_init() {
+	if File_metadata_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_metadata_proto_metadata_proto_rawDesc), len(file_internal_metadata_proto_metadata_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_metadata_proto_rawDesc), len(file_metadata_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_internal_metadata_proto_metadata_proto_goTypes,
-		DependencyIndexes: file_internal_metadata_proto_metadata_proto_depIdxs,
-		EnumInfos:         file_internal_metadata_proto_metadata_proto_enumTypes,
-		MessageInfos:      file_internal_metadata_proto_metadata_proto_msgTypes,
+		GoTypes:           file_metadata_proto_goTypes,
+		DependencyIndexes: file_metadata_proto_depIdxs,
+		EnumInfos:         file_metadata_proto_enumTypes,
+		MessageInfos:      file_metadata_proto_msgTypes,
 	}.Build()
-	File_internal_metadata_proto_metadata_proto = out.File
-	file_internal_metadata_proto_metadata_proto_goTypes = nil
-	file_internal_metadata_proto_metadata_proto_depIdxs = nil
+	File_metadata_proto = out.File
+	file_metadata_proto_goTypes = nil
+	file_metadata_proto_depIdxs = nil
 }

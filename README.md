@@ -18,6 +18,8 @@ A WebDAV server backed by NZB/Usenet that provides seamless access to Usenet con
 
 Complete setup guides, configuration options, API reference, and troubleshooting information.
 
+Upload clients can use the generic [duplicate lookup API](docs/docs/4.%20API/duplicate-lookup.md) to find a reusable NZB by original filename, exact size, and sampled content hash.
+
 ## Quick Start
 
 ### Docker (Recommended)

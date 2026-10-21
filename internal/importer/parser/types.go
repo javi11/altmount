@@ -65,23 +65,24 @@ func (p *ParsedNzb) SetPassword(password string) {
 
 // ParsedFile represents a file extracted from the NZB
 type ParsedFile struct {
-	Subject       string
-	Filename      string
-	Size          int64
-	Segments      []*metapb.SegmentData
-	SegmentRefs   []*metapb.SegmentRef // v3: refs into NzbStore (populated when Store != nil)
-	Groups        []string
-	IsRarArchive  bool
-	Is7zArchive   bool
-	IsPar2Archive bool
-	Encryption    metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
-	Password      string            // Password from NZB meta, nil if not encrypted
-	Salt          string            // Salt from NZB meta, nil if not encrypted
-	ReleaseDate   time.Time         // Release date from the Usenet post
-	OriginalIndex int               // Original position in the parsed NZB file list
-	NzbdavID      string            // Original ID from nzbdav (for backward compatibility)
-	AesKey        []byte            // AES encryption key (for nzbdav compatibility)
-	AesIv         []byte            // AES initialization vector (for nzbdav compatibility)
+	Subject          string
+	Filename         string
+	OriginalFilename string // Recovered posted name before import/display renaming.
+	Size             int64
+	Segments         []*metapb.SegmentData
+	SegmentRefs      []*metapb.SegmentRef // v3: refs into NzbStore (populated when Store != nil)
+	Groups           []string
+	IsRarArchive     bool
+	Is7zArchive      bool
+	IsPar2Archive    bool
+	Encryption       metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
+	Password         string            // Password from NZB meta, nil if not encrypted
+	Salt             string            // Salt from NZB meta, nil if not encrypted
+	ReleaseDate      time.Time         // Release date from the Usenet post
+	OriginalIndex    int               // Original position in the parsed NZB file list
+	NzbdavID         string            // Original ID from nzbdav (for backward compatibility)
+	AesKey           []byte            // AES encryption key (for nzbdav compatibility)
+	AesIv            []byte            // AES initialization vector (for nzbdav compatibility)
 
 	// FirstSegmentBytes holds the decoded leading bytes (≤16KB) of this file's first
 	// segment, captured when the parser fetched it during first-segment analysis. It
