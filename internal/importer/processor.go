@@ -1391,6 +1391,9 @@ func (proc *Processor) processSingleFile(
 	}
 
 	// Use the final name for processing
+	if regularFiles[0].OriginalFilename == "" {
+		regularFiles[0].OriginalFilename = filepath.Base(regularFiles[0].Filename)
+	}
 	regularFiles[0].Filename = finalName
 
 	// Process the single file at the resolved parentPath
@@ -1841,6 +1844,9 @@ func applyNzbRename(renameToNzbName bool, nzbName string, files []parser.ParsedF
 		return files
 	}
 	originalDir := filepath.Dir(files[0].Filename)
+	if files[0].OriginalFilename == "" {
+		files[0].OriginalFilename = leaf
+	}
 	normalizedBase := normalizeReleaseFilename(nzbName, leaf)
 	if originalDir != "." && originalDir != "" {
 		files[0].Filename = filepath.Join(originalDir, normalizedBase)

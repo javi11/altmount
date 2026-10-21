@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/nntppool/v5"
+	"github.com/javi11/nzbparser"
 	"github.com/kipsilabs/altmount/internal/config"
 	"github.com/kipsilabs/altmount/internal/importer/filesystem"
 	"github.com/kipsilabs/altmount/internal/importer/multifile"
@@ -19,8 +21,6 @@ import (
 	metapb "github.com/kipsilabs/altmount/internal/metadata/proto"
 	"github.com/kipsilabs/altmount/internal/pool"
 	"github.com/kipsilabs/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/nntppool/v5"
-	"github.com/javi11/nzbparser"
 )
 
 type processorTestPoolManager struct {
@@ -967,5 +967,20 @@ func TestPreParseFastFailDegradedVideoReturnsHolesForPersistence(t *testing.T) {
 	}
 	if _, ok := degraded["Movie.2024.mkv"]; !ok {
 		t.Errorf("degradedFiles = %v, want the degraded video", degraded)
+	}
+}
+
+func TestApplyNzbRenamePreservesOriginalFilename(t *testing.T) {
+	const original = "a3f9c1d2e4b5a6f7c8d9e0f1a2b3c4d5.mkv"
+	files := applyNzbRename(true, "Movie.2026.nzb", []parser.ParsedFile{{Filename: original}})
+	if files[0].Filename == original {
+		t.Fatal("test must exercise an actual rename")
+	}
+	if files[0].OriginalFilename != original {
+		t.Fatalf("original name lost: %q", files[0].OriginalFilename)
+	}
+	files = applyNzbRename(true, "Other.2026.nzb", files)
+	if files[0].OriginalFilename != original {
+		t.Fatal("a second rename replaced original identity")
 	}
 }

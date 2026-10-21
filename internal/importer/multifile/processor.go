@@ -139,6 +139,11 @@ func ProcessRegularFiles(
 				file.NzbdavID,
 			)
 
+			fileMeta.OriginalFilename = filepath.Base(file.OriginalFilename)
+			if file.OriginalFilename == "" {
+				fileMeta.OriginalFilename = filepath.Base(file.Filename)
+			}
+
 			metadataPath := metadataService.GetMetadataFilePath(virtualPath)
 			if _, err := os.Stat(metadataPath); err == nil {
 				_ = metadataService.DeleteFileMetadata(ctx, virtualPath)

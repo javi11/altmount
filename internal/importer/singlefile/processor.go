@@ -87,6 +87,11 @@ func ProcessSingleFile(
 		file.NzbdavID,
 	)
 
+	fileMeta.OriginalFilename = filepath.Base(file.OriginalFilename)
+	if file.OriginalFilename == "" {
+		fileMeta.OriginalFilename = filepath.Base(file.Filename)
+	}
+
 	// Write file metadata to disk (v3 store-backed when available, else v1)
 	if err := metadataService.WriteFileMetadataAuto(ctx, virtualFilePath, fileMeta, storeIndex, storeRef); err != nil {
 		return "", "", fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)

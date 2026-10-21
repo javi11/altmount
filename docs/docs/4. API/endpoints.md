@@ -60,7 +60,9 @@ The per-user **API key** (visible in **System → Settings**) is only honoured b
 | `POST /api/arrs/webhook` — Sonarr/Radarr webhook | `?apikey=` (required) |
 | `POST /api/import/file` — manual NZB file import | `?apikey=` (required) |
 
-For everything else (queue, health, files, config, providers, system, FUSE, user, etc.) use the JWT flow above.
+The [duplicate lookup endpoint](./duplicate-lookup.md), `POST /api/files/duplicate-lookup`, accepts the raw API key through the `X-API-Key` header. It requires that header even when interactive login is disabled and does not accept `?apikey=` or a JWT as a substitute.
+
+For the other protected endpoints (queue, health, files, config, providers, system, FUSE, user, etc.) use the JWT flow above.
 
 ### Stremio addon
 

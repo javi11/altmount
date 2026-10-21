@@ -16,6 +16,68 @@
     "host": "localhost:8080",
     "basePath": "/api",
     "paths": {
+        "/files/duplicate-lookup": {
+            "post": {
+                "description": "Uses the sample-sha256-v1 protocol. Returns raw NZB XML on a match, or 204 on a miss. Requires X-API-Key even when interactive login is disabled.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/x-nzb"
+                ],
+                "tags": [
+                    "Files"
+                ],
+                "summary": "Find a reusable NZB by original filename, size and sampled content hash",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "API key",
+                        "name": "X-API-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "File fingerprint",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/duplicatelookup.Request"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/arrs/download-client/register": {
             "post": {
                 "security": [
@@ -5609,6 +5671,23 @@
         }
     },
     "definitions": {
+        "duplicatelookup.Request": {
+            "type": "object",
+            "properties": {
+                "algorithm": {
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
         "api.APIError": {
             "type": "object",
             "properties": {
